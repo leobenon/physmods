@@ -1,0 +1,10 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		}
+	],
+	"settings": {
+		"python.defaultInterpreterPath": "/Users/rukan1/Desktop/my-env/bin/python"
+	}
+}
