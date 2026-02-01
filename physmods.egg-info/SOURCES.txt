@@ -2,6 +2,9 @@ pyproject.toml
 Physics_modules/__init__.py
 Physics_modules/differentiation.py
 Physics_modules/integration.py
+physics_modules/__init__.py
+physics_modules/differentiation.py
+physics_modules/integration.py
 physmods.egg-info/PKG-INFO
 physmods.egg-info/SOURCES.txt
 physmods.egg-info/dependency_links.txt
