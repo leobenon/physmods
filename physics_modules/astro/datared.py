@@ -51,7 +51,7 @@ def get_overview(filenames, verbose = False):
         print(f"possible exposure times: {list_of_exp} s")  
     return list_of_exp
 
-def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,exposure_science: float = 30, exposure_flat: float = 2.5, verbose: bool = False,):
+def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,exposure_science: float = 30, exposure_flat: float = 2.5, verbose: bool = False, df_check:bool = False):
     """
     Calibrating science images through data reduction
     -------
@@ -65,6 +65,8 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,
         Exposure time of the science images (default is set to 30s).
     exposure_flat: float
         Exposure time of the flat images (default is set to 2.5s).
+    df_check: bool
+        If there are separate darkflats frames, enter True otherwise False.
     --------
     Returns
     ------
@@ -125,17 +127,8 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,
     if len(flats) == 0:
         raise ValueError(f"No flats found with exposure {exposure_flat}s")
     flats = np.stack(flats)
-# building darkflats
-    darkflats = []
-    for x in dark_flat_path:
-        darkflat_data, exp_time_darkflat = load_image(x)
-        if exp_match(exp_time_darkflat,exposure_flat):
-            darkflats.append(darkflat_data)
-    if len(darkflats) == 0:
-        raise ValueError(f"No darkflats found with exposure {exposure_flat}s")
-    darkflats = np.stack(darkflats)
 
-# shape check of the pixels of each frame
+    # shape check of the pixels of each frame
     sci_shape = raw_images[0].shape
 
     if darks.shape[1:] != sci_shape:
@@ -143,18 +136,31 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,
 
     if flats.shape[1:] != sci_shape:
         raise ValueError(f"Flat shape {flats.shape[1:]} does not match science shape {sci_shape}")
-
-    if darkflats.shape[1:] != flats.shape[1:]:
-        raise ValueError(f"Dark-flat shape {darkflats.shape[1:]} does not match flat shape {flats.shape[1:]}")
-
-# building the masters of each dataset
+    
+    # building the masters of each dataset
     master_d = np.median(darks, axis=0)
 
     master_f = np.median(flats,axis=0)
-
-    master_df = np.median(darkflats, axis=0)
     
-    f_corr = master_f - master_df # corrected flats
+# building darkflats if df_check is True
+    if df_check:
+        darkflats = []
+        for x in dark_flat_path:
+            darkflat_data, exp_time_darkflat = load_image(x)
+            if exp_match(exp_time_darkflat,exposure_flat):
+                darkflats.append(darkflat_data)
+        if len(darkflats) == 0:
+            raise ValueError(f"No darkflats found with exposure {exposure_flat}s")
+        darkflats = np.stack(darkflats)
+        if darkflats.shape[1:] != flats.shape[1:]:
+            raise ValueError(f"Dark-flat shape {darkflats.shape[1:]} does not match flat shape {flats.shape[1:]}")
+        master_df = np.median(darkflats, axis=0)
+        f_corr = master_f - master_df # corrected flats
+
+    else:
+        f_corr = master_f - exposure_flat*master_d/exposure_science
+    
+    
     med_corr = np.median(f_corr) # median of corrected flats for normalization
 
     if not np.isfinite(med_corr) or med_corr <=0: # error check whether the median is either not finite or is less or equal to zero
@@ -168,7 +174,10 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,
         cal_image = (image - master_d)/f_norm
         calibrated_images.append(cal_image)
     calibrated_images = np.stack(calibrated_images)
-    return  calibrated_images,science_filenames, darks, flats, darkflats, master_d, master_f, master_df, f_norm
+    if df_check:
+        return  calibrated_images,science_filenames, darks, flats, darkflats, master_d, master_f, master_df, f_norm
+    else:
+        return  calibrated_images,science_filenames, darks, flats, master_d, master_f,f_norm
 
 # Comparison plots of calibrated images vs the raw science images. 
 # (calibrated images don't necessarily have to be the calibrated science images, one can also compare the darks, flats, etc. with the raw images)
