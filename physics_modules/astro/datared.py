@@ -51,7 +51,7 @@ def get_overview(filenames, verbose = False):
         print(f"possible exposure times: {list_of_exp} s")  
     return list_of_exp
 
-def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,exposure_science: float = 30, exposure_flat: float = 2.5, verbose: bool = False, df_check:bool = False):
+def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path = None ,exposure_science: float = 30, exposure_flat: float = 2.5, verbose: bool = False):
     """
     Calibrating science images through data reduction
     -------
@@ -143,7 +143,7 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,
     master_f = np.median(flats,axis=0)
     
 # building darkflats if df_check is True
-    if df_check:
+    if dark_flat_path is not None:
         darkflats = []
         for x in dark_flat_path:
             darkflat_data, exp_time_darkflat = load_image(x)
@@ -174,7 +174,7 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path,
         cal_image = (image - master_d)/f_norm
         calibrated_images.append(cal_image)
     calibrated_images = np.stack(calibrated_images)
-    if df_check:
+    if dark_flat_path is not None :
         return  calibrated_images,science_filenames, darks, flats, darkflats, master_d, master_f, master_df, f_norm
     else:
         return  calibrated_images,science_filenames, darks, flats, master_d, master_f,f_norm
