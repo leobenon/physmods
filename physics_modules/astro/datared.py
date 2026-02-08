@@ -66,13 +66,19 @@ def save_image(
         arr = arr.astype(dtype, copy=False)
 
     hdr = (header.copy() if header is not None else fits.Header())
+    for key in ["FOCALLEN", "APERTURE", "TEMPERAT", "EXPOSURE", "EXPTIME"]:
+        if key in hdr:
+            try:
+                hdr[key] = float(hdr[key])
+            except Exception:
+                pass
     # Minimal provenance metadata (useful later)
     hdr["HISTORY"] = "Written by physic_modules.save_image"
     hdr["BUNIT"] = hdr.get("BUNIT", "adu")  # optional default
 
     hdu = fits.PrimaryHDU(arr, header=hdr)
     hdul = fits.HDUList([hdu])
-    hdul.writeto(out_path, overwrite=overwrite)
+    hdul.writeto(out_path, overwrite=overwrite, output_verify="silentfix")
 
     return out_path
 
