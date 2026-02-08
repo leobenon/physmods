@@ -1,3 +1,6 @@
+from __future__ import annotations
+from pathlib import Path
+from typing import Optional, Union
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
@@ -27,9 +30,7 @@ def load_image(filepath):
         data = hdul[0].data.astype(np.float32)
     return data, exposure_time
 
-from pathlib import Path
-from typing import Optional, Union
-from __future__ import annotations
+
 def save_image(
     data: np.ndarray,
     out_path: Union[str, Path],
