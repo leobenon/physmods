@@ -2,7 +2,6 @@ import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
 
-
 def load_image(filepath):
     """
     Loading the fits data
@@ -27,6 +26,54 @@ def load_image(filepath):
         exposure_time = float(exposure_time)
         data = hdul[0].data.astype(np.float32)
     return data, exposure_time
+
+from pathlib import Path
+from typing import Optional, Union
+from __future__ import annotations
+def save_image(
+    data: np.ndarray,
+    out_path: Union[str, Path],
+    header: Optional[fits.Header] = None,
+    overwrite: bool = False,
+    dtype: Optional[np.dtype] = np.float32,
+) -> Path:
+    """
+    Save a 2D (or 3D stack) numpy array as a FITS file.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Image data to write. (ny, nx) or (n, ny, nx).
+    out_path : str or Path
+        Output filename (should end with .fits/.fit).
+    header : astropy.io.fits.Header, optional
+        FITS header to write. If provided, it will be copied and updated.
+    overwrite : bool
+        Overwrite existing file if True.
+    dtype : numpy dtype or None
+        Cast data to this dtype before writing. Use None to keep current dtype.
+
+    Returns
+    -------
+    Path
+        Path to the written FITS file.
+    """
+    out_path = Path(out_path)
+
+    arr = np.asarray(data)
+    if dtype is not None:
+        arr = arr.astype(dtype, copy=False)
+
+    hdr = (header.copy() if header is not None else fits.Header())
+    # Minimal provenance metadata (useful later)
+    hdr["HISTORY"] = "Written by physic_modules.save_image"
+    hdr["BUNIT"] = hdr.get("BUNIT", "adu")  # optional default
+
+    hdu = fits.PrimaryHDU(arr, header=hdr)
+    hdul = fits.HDUList([hdu])
+    hdul.writeto(out_path, overwrite=overwrite)
+
+    return out_path
 
 def get_overview(filenames, verbose = False):
     """
@@ -175,9 +222,11 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path 
         calibrated_images.append(cal_image)
     calibrated_images = np.stack(calibrated_images)
     if dark_flat_path is not None :
-        return  calibrated_images,science_filenames, darks, flats, darkflats, master_d, master_f, master_df, f_norm
+        return  calibrated_images,science_filenames, raw_images,darks, flats, darkflats, master_d, master_f, master_df, f_norm
     else:
-        return  calibrated_images,science_filenames, darks, flats, master_d, master_f,f_norm
+        return  calibrated_images,science_filenames, raw_images,darks, flats, master_d, master_f,f_norm
+
+
 
 # Comparison plots of calibrated images vs the raw science images. 
 # (calibrated images don't necessarily have to be the calibrated science images, one can also compare the darks, flats, etc. with the raw images)
