@@ -102,10 +102,10 @@ def get_overview(filenames, verbose = False):
     list_of_exp = np.array(list_of_exp) 
     list_of_exp = np.unique(list_of_exp) # gives all unique exposure times
     if verbose:
-        print(f"possible exposure times: {list_of_exp} s")  
+        print(f"possible exposure times: {list_of_exp} s")
     return list_of_exp
 
-def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path = None ,exposure_science: float = 30, exposure_flat: float = 2.5, verbose: bool = False):
+def calibrate_science_images(science_path, flat_path, dark_path = None, dark_flat_path = None ,bias_path = None, exposure_science: float = 30, exposure_flat: float = 2.5, verbose: bool = False):
     """
     Calibrating science images through data reduction
     -------
@@ -144,22 +144,19 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path 
         Master-flat corrected and normalized images for reduction.
     
     """
+    darks = None
+    master_d = None
+    master_b = None
+    darkflats = None
+    master_df = None
+    bias = None
     list_of_exp = get_overview(science_path, verbose=verbose)
     if exposure_science not in list_of_exp:
         raise ValueError(f"The chosen exposure time, {exposure_science} s, is not included in the data, please choose a new exposure from: {list_of_exp} s")
     
     def exp_match(t,target, tol = 1e-6):
         return np.isclose(t,target, rtol=0.0, atol=tol)
-
-# building darks
-    darks = []
-    for x in dark_path:
-        dark_data, exp_time_dark = load_image(x)
-        if exp_match(exp_time_dark,exposure_science) :
-            darks.append(dark_data)
-    if len(darks) == 0:
-        raise ValueError(f"No darks found with exposure {exposure_science}s")
-    darks = np.stack(darks)
+    
 
 # building raw science images 
     raw_images = []
@@ -172,6 +169,9 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path 
     if len(raw_images) == 0:
         raise ValueError(f"No raw science images found with exposure {exposure_science}s")
     raw_images = np.stack(raw_images)
+
+    # shape check of the pixels of each frame
+    sci_shape = raw_images[0].shape
 # building flats
     flats = []
     for x in flat_path:
@@ -181,22 +181,25 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path 
     if len(flats) == 0:
         raise ValueError(f"No flats found with exposure {exposure_flat}s")
     flats = np.stack(flats)
-
-    # shape check of the pixels of each frame
-    sci_shape = raw_images[0].shape
-
-    if darks.shape[1:] != sci_shape:
-        raise ValueError(f"Dark shape {darks.shape[1:]} does not match science shape {sci_shape}")
-
+    master_f = np.median(flats,axis=0)
+    # building darks
+    if dark_path is not None:
+        darks = []
+        for x in dark_path:
+            dark_data, exp_time_dark = load_image(x)
+            if exp_match(exp_time_dark,exposure_science) :
+                darks.append(dark_data)
+        if len(darks) == 0:
+            raise ValueError(f"No darks found with exposure {exposure_science}s")
+        darks = np.stack(darks)
+        master_d = np.median(darks, axis=0)
+        if darks.shape[1:] != sci_shape:
+            raise ValueError(f"Dark shape {darks.shape[1:]} does not match science shape {sci_shape}")
+        
     if flats.shape[1:] != sci_shape:
         raise ValueError(f"Flat shape {flats.shape[1:]} does not match science shape {sci_shape}")
     
-    # building the masters of each dataset
-    master_d = np.median(darks, axis=0)
-
-    master_f = np.median(flats,axis=0)
-    
-# building darkflats if df_check is True
+# building darkflats if they exist
     if dark_flat_path is not None:
         darkflats = []
         for x in dark_flat_path:
@@ -211,27 +214,51 @@ def calibrate_science_images(science_path, dark_path, flat_path, dark_flat_path 
         master_df = np.median(darkflats, axis=0)
         f_corr = master_f - master_df # corrected flats
 
-    else:
-        f_corr = master_f - exposure_flat*master_d/exposure_science
-    
-    
+
+
+
     med_corr = np.median(f_corr) # median of corrected flats for normalization
 
     if not np.isfinite(med_corr) or med_corr <=0: # error check whether the median is either not finite or is less or equal to zero
         raise ValueError("Flat correction median is not finite or <=0. Check flats/darkflats for saturation or mismatch.")
     
     f_norm = f_corr/med_corr # normalized corrected flats
+    # building bias if needed
+    if bias_path is not None:
+        bias = []
+        for x in bias_path:
+            bias_data, exp_time_bias = load_image(x)
+            if exp_match(exp_time_bias,0.0):
+                bias.append(bias_data)
+        if len(bias) == 0:
+            raise ValueError(f"No bias frames found with exposure {0.0}s")
+        bias = np.stack(bias)
+        if bias.shape[1:] != flats.shape[1:]:
+            raise ValueError(f"Bias shape {bias.shape[1:]} does not match flat shape {sci_shape}")
+        master_b = np.median(bias, axis=0)
+
+
 
     calibrated_images = []
-
-    for image in raw_images:
-        cal_image = (image - master_d)/f_norm
-        calibrated_images.append(cal_image)
-    calibrated_images = np.stack(calibrated_images)
-    if dark_flat_path is not None :
-        return  calibrated_images,science_filenames, raw_images,darks, flats, darkflats, master_d, master_f, master_df, f_norm
+    if bias_path is not None and dark_path is not None:
+        for image in raw_images:
+            cal_image = (image - master_d)/f_norm
+            calibrated_images.append(cal_image)
+    elif bias_path is not None and dark_path is None:
+            for image in raw_images:
+                cal_image = (image - master_b)/f_norm
+                calibrated_images.append(cal_image)
+    elif bias_path is None and dark_path is not None:
+        for image in raw_images:
+            cal_image = (image - master_d)/f_norm
+            calibrated_images.append(cal_image)
     else:
-        return  calibrated_images,science_filenames, raw_images,darks, flats, master_d, master_f,f_norm
+        for image in raw_images:
+            cal_image = image/f_norm
+            calibrated_images.append(cal_image)
+    calibrated_images = np.stack(calibrated_images)
+
+    return  calibrated_images,science_filenames, raw_images,darks, flats, darkflats,bias, master_d, master_f, master_df, master_b,f_norm
 
 
 
