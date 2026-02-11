@@ -154,7 +154,7 @@ def calibrate_science_images(science_path, flat_path, dark_path = None, dark_fla
     if exposure_science not in list_of_exp:
         raise ValueError(f"The chosen exposure time, {exposure_science} s, is not included in the data, please choose a new exposure from: {list_of_exp} s")
     
-    def exp_match(t,target, tol = 1e-6):
+    def exp_match(t,target, tol = 1e-2):
         return np.isclose(t,target, rtol=0.0, atol=tol)
     
 
