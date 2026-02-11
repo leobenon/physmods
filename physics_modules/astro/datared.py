@@ -275,13 +275,13 @@ def PlotCalibVsRaw(calibrated_images, raw_images, names, kcalib, kraw):
     plt.tight_layout()
     plt.show()
     
-    def plot_im(image, kimage):
-        if kimage<=0:
-            raise ValueError("kimage must be greater than 0.")
-        for i in range(image.shape[0]):
-            fig,ax = plt.subplots()
-            vmin,vmax = (np.median(image[i] - kimage*np.std(image[i])), np.median(image[i] + kimage*np.std(image[i])))
-            im = ax.imshow(image[i], cmap="gray_r", origin="lower", vmin=vmin, vmax=vmax)
-            fig.colorbar(im,ax=ax)
-        plt.tight_layout()
-        plt.show()
+def plot_im(image, kimage):
+    if kimage<=0:
+        raise ValueError("kimage must be greater than 0.")
+    for i in range(image.shape[0]):
+        fig,ax = plt.subplots()
+        vmin,vmax = (np.median(image[i] - kimage*np.std(image[i])), np.median(image[i] + kimage*np.std(image[i])))
+        im = ax.imshow(image[i], cmap="gray_r", origin="lower", vmin=vmin, vmax=vmax)
+        fig.colorbar(im,ax=ax)
+    plt.tight_layout()
+    plt.show()
