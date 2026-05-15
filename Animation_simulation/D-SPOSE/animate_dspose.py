@@ -86,6 +86,53 @@ def quat_to_dcm(q):  # calculates C matrix
         [    2*(q1*q3 - q0*q2),     2*(q2*q3 + q0*q1), 1 - 2*(q1*q1 + q2*q2)]
     ])
 
+def quat_to_euler321(q):
+    q = np.asarray(q, dtype=float)
+    q = q / np.linalg.norm(q)
+
+    q0, q1, q2, q3 = q
+
+    # roll (phi)
+    phi = np.arctan2(
+        2*(q0*q1 + q2*q3),
+        1 - 2*(q1*q1 + q2*q2)
+    )
+
+    # pitch (theta)
+    theta = np.arcsin(
+        2*(q0*q2 - q3*q1)
+    )
+
+    # yaw (psi)
+    psi = np.arctan2(
+        2*(q0*q3 + q1*q2),
+        1 - 2*(q2*q2 + q3*q3)
+    )
+
+    return np.degrees([phi, theta, psi])
+
+def read_initial_params_from_header(path):
+    with open(path, "r") as f:
+        for line in f:
+            if line.startswith("# SPACECRAFT PARAMETERS:"):
+                vals = np.array(line.split(":")[1].split(), dtype=float)
+                break
+        else:
+            raise ValueError("Could not find SPACECRAFT PARAMETERS in file header.")
+
+
+    euler0_deg = vals[11:14]   # [deg]
+    frame_flag = int(vals[14])
+
+    if frame_flag == 1:
+        frame_name = "IRF"
+    elif frame_flag == 2:
+        frame_name = "ORF"
+    else:
+        frame_name = f"unknown frame flag {frame_flag}"
+
+    return euler0_deg, frame_flag, frame_name
+
 def rotate_tris(tris, R):
     return tris @ R.T
 
@@ -111,6 +158,15 @@ def draw_earth(ax, radius_km=6378.0, n=36):
 tris_body = load_geometry(geom_file)
 t, r_m, w_body, q, v = load_propagation(prop_file)
 t2, T_gg, T_srp = load_perturbations(pert_file)
+
+#Extract initial parameters
+
+t_init, r_m_init, w_body_init, q_init, v_init = t[0], r_m[0]/1000, np.rad2deg(w_body[0]), q[0], v[0]/1000 # [s], [km], [°/s], [], [km/s]
+
+euler0_header, frame_flag, frame_name = read_initial_params_from_header(prop_file)
+phi_init = euler0_header[0] # roll
+theta_init = euler0_header[1] # pitch
+psi_init = euler0_header[2] # yaw
 
 if not np.allclose(t, t2):
     raise ValueError("Propagation and perturbation times do not match.")
@@ -581,7 +637,18 @@ def update(i):
 
 
     fig.suptitle(f"t = {t[i]/3600:.2f} h / {t[i]/3600/24:.2f} days")
-    fig2.suptitle(f"t = {t[i]/3600:.2f} h / {t[i]/3600/24:.2f} days")
+    fig2.suptitle(
+    f"t = {t[i]/3600:.2f} h / {t[i]/3600/24:.2f} days \n"
+    f"Initial parameters:\n"
+    f"r = [{r_m_init[0]:.2f}, {r_m_init[1]:.2f}, {r_m_init[2]:.2f}] km, "
+    f"v = [{v_init[0]:.3f}, {v_init[1]:.3f}, {v_init[2]:.3f}] km/s,"
+    f"ω = [{w_body_init[0]:.2f}, {w_body_init[1]:.2f}, {w_body_init[2]:.2f}] °/s,\n "
+    rf"$\phi$ = {phi_init:.2f}°, "
+    rf"$\theta$ = {theta_init:.2f}°, "
+    rf"$\psi$ = {psi_init:.2f}° "
+    f"w.r.t {frame_name}",
+    fontsize=10
+)
     return [
     mesh, mesh_x, mesh_y, mesh_z,
     sat_point, *triad_lines,
@@ -625,7 +692,7 @@ if args.show:
 scale = 8.0
 time_days = t / 3600 / 24
 
-fig = plt.figure(figsize=(10,10))
+fig = plt.figure(figsize=(9,7))
 ax = fig.add_subplot(111, projection="3d")
 
 # scale trajectories
