@@ -288,7 +288,7 @@ def orbit_normal_from_elements(inc, raan):
         np.cos(inc)
     ])
 # ----- Adding figure 3 for animating the orbital and ecliptic plane -----
-fig3 = plt.figure(figsize=(7, 7))
+fig3 = plt.figure(figsize=(8, 8))
 ax_planes = fig3.add_subplot(111, projection="3d")
 
 ax_planes.set_title("Ecliptic plane and osculating orbit plane")
@@ -387,7 +387,7 @@ srp_scale = 8.0 / srp_mag_max if srp_mag_max > 0 else 1.0
 # ----------------------------
 # figure
 # ----------------------------
-fig = plt.figure(figsize=(14, 8))
+fig = plt.figure(figsize=(16, 9))
 ax_orbit = fig.add_subplot(1, 2, 1, projection="3d")
 ax_body  = fig.add_subplot(1, 2, 2, projection="3d")
 fig2 = plt.figure(figsize=(15, 9))
@@ -732,14 +732,14 @@ def update(i):
     )
 
     # slowly rotate the camera during the animation
-    azim = 30 + 360 * i / len(t)
-    elev = 25
+    azim = 45 #+ 180 * i / len(t)
+    elev = 45
     ax_planes.view_init(elev=elev, azim=azim)
 
     fig3.suptitle(
         f"t = {t[i]/3600:.2f} h / {t[i]/3600/24:.2f} days\n"
-        f"RAAN = {np.rad2deg(raan[i]):.2f}°, "
-        f"i = {np.rad2deg(inc[i]):.3f}°, "
+        r"$\Omega$" f" = {np.rad2deg(raan[i]):.2f}°, "
+        f"i = {np.rad2deg(inc[i]):.3f}°, \n"
         f"orbit/ecliptic angle = {angle_planes:.3f}°"
     )
 
@@ -915,9 +915,9 @@ def show_plot(hold=False, save=False):
         ani2 = FuncAnimation(fig2, update, frames=len(t), interval=hold_frames*60, blit=False)
         ani3 = FuncAnimation(fig3, update, frames=len(t), interval=hold_frames*60, blit=False)
     else:
-        ani = FuncAnimation(fig, update, frames=len(t), interval=40, blit=False)
-        ani2 = FuncAnimation(fig2, update, frames=len(t), interval=40, blit=False)
-        ani3 = FuncAnimation(fig3, update, frames=len(t), interval=40, blit=False)
+        ani = FuncAnimation(fig, update, frames=len(t), interval=8, blit=False)
+        ani2 = FuncAnimation(fig2, update, frames=len(t), interval=8, blit=False)
+        #ani3 = FuncAnimation(fig3, update, frames=len(t), interval=8, blit=False)
 
     plt.tight_layout()
 
@@ -929,7 +929,7 @@ def show_plot(hold=False, save=False):
     return ani, ani2, ani3
 
 
-ani, ani2 , ani3 = show_plot(hold=False, save=args.save)
+ani, ani2  = show_plot(hold=False, save=args.save)  # , ani3
 
 if args.show:
     plt.show()
@@ -941,7 +941,7 @@ if args.show:
 scale = 8.0
 time_days = t / 3600 / 24
 
-fig = plt.figure(figsize=(9,7))
+fig = plt.figure(figsize=(10,8))
 ax = fig.add_subplot(111, projection="3d")
 
 # scale trajectories
@@ -1021,6 +1021,8 @@ ax.set_zlabel("Z")
 
 ax.set_box_aspect([1,1,1])
 ax.legend()
+
+ax.view_init(elev=-45 , azim=45)
 
 # one shared colorbar
 cbar = fig.colorbar(scx, ax=ax, shrink=0.7)
