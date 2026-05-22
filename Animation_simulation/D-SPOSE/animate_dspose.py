@@ -153,11 +153,197 @@ def draw_earth(ax, radius_km=6378.0, n=36):
     z = radius_km * np.outer(np.ones_like(u), np.cos(v))
     ax.plot_surface(x, y, z, alpha=0.2, linewidth=0)
 
+
 # load data 1 
 
 tris_body = load_geometry(geom_file)
 t, r_m, w_body, q, v = load_propagation(prop_file)
 t2, T_gg, T_srp = load_perturbations(pert_file)
+
+
+# --- Draw eclitic and intantaneous orbit plane ----
+
+def plane_disk_from_normal(n, radius=1.0, N=100):
+    n = np.asarray(n, dtype=float)
+    n = n / np.linalg.norm(n)
+
+    a = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(a, n)) > 0.9:
+        a = np.array([0.0, 1.0, 0.0])
+
+    u = np.cross(n, a)
+    u = u / np.linalg.norm(u)
+    v = np.cross(n, u)
+
+    theta = np.linspace(0, 2*np.pi, N)
+
+    circle = radius * (
+        np.outer(np.cos(theta), u)
+        + np.outer(np.sin(theta), v)
+    )
+
+    return circle
+
+# ---- Turn velocity and position into osculating parameters ----
+
+def state2coe(R, V):
+    """
+    Convert position and velocity vectors to classical orbital elements.
+
+    Parameters:
+        R : array_like (3,) - position vector (m)
+        V : array_like (3,) - velocity vector (m/s)
+
+    Returns:
+        sma  : semi-major axis (m)
+        ecc  : eccentricity
+        inc  : inclination (rad)
+        raan : right ascension of ascending node (rad)
+        aop  : argument of perigee (rad)
+        ta   : true anomaly (rad)
+    """
+
+    eps = 1e-10
+    mu = 3.986004418e14  # Earth's gravitational parameter (m^3/s^2)
+
+    R = np.array(R, dtype=float)
+    V = np.array(V, dtype=float)
+
+    r = np.linalg.norm(R)
+    v = np.linalg.norm(V)
+
+    vr = np.dot(R, V) / r
+
+    # Angular momentum
+    H = np.cross(R, V)
+    h = np.linalg.norm(H)
+
+    # Inclination
+    inc = np.arccos(H[2] / h)
+
+    # Node vector
+    z = np.array([0.0, 0.0, 1.0])
+    N = np.cross(z, H)
+    no = np.linalg.norm(N)
+
+    # RAAN
+    if no != 0:
+        raan = np.arccos(N[0] / no)
+        if N[1] < 0:
+            raan = 2 * np.pi - raan
+    else:
+        raan = 0.0
+
+    # Eccentricity vector
+    E = (1 / mu) * ((v**2 - mu / r) * R - r * vr * V)
+    ecc = np.linalg.norm(E)
+
+    # Semi-major axis
+    sma = h**2 / mu / (1 - ecc**2)
+
+    # Argument of perigee
+    if no != 0:
+        if ecc > eps:
+            aop = np.arccos(np.dot(N, E) / (no * ecc))
+            if E[2] < 0:
+                aop = 2 * np.pi - aop
+        else:
+            aop = 0.0
+    else:
+        aop = 0.0
+
+    # True anomaly
+    if ecc > eps:
+        ta = np.arccos(np.dot(E, R) / (ecc * r))
+        if vr < 0:
+            ta = 2 * np.pi - ta
+    else:
+        cp = np.cross(N, R)
+        if cp[2] >= 0:
+            ta = np.arccos(np.dot(N, R) / (no * r))
+        else:
+            ta = 2 * np.pi - np.arccos(np.dot(N, R) / (no * r))
+
+    return sma, ecc, inc, raan, aop, ta
+sma ,ecc , inc , raan , aop , ta = [],[],[],[],[],[]
+for i in range(len(t)):
+    sma_i, ecc_i, inc_i, raan_i, aop_i, ta_i = state2coe(r_m[i,:],v[i,:])
+    sma.append(sma_i)
+    ecc.append(ecc_i)
+    inc.append(inc_i)
+    raan.append(raan_i)
+    aop.append(aop_i)
+    ta.append(ta_i)
+sma = np.array(sma)
+ecc = np.array(ecc)
+inc = np.array(inc)
+raan = np.array(raan)
+aop = np.array(aop)
+ta = np.array(ta)
+
+def orbit_normal_from_elements(inc, raan):
+    return np.array([
+        np.sin(inc) * np.sin(raan),
+       -np.sin(inc) * np.cos(raan),
+        np.cos(inc)
+    ])
+# ----- Adding figure 3 for animating the orbital and ecliptic plane -----
+fig3 = plt.figure(figsize=(7, 7))
+ax_planes = fig3.add_subplot(111, projection="3d")
+
+ax_planes.set_title("Ecliptic plane and osculating orbit plane")
+ax_planes.set_xlabel("X")
+ax_planes.set_ylabel("Y")
+ax_planes.set_zlabel("Z")
+
+plane_radius = 1.0
+
+# fixed ecliptic normal
+eps = np.deg2rad(23.43928)
+n_ecl = np.array([0.0, -np.sin(eps), np.cos(eps)])
+
+ecl_circle = plane_disk_from_normal(n_ecl, radius=plane_radius)
+ecl_line, = ax_planes.plot(
+    ecl_circle[:,0], ecl_circle[:,1], ecl_circle[:,2],
+    color="orange", lw=2, label="Ecliptic plane"
+)
+
+orbit_line, = ax_planes.plot([], [], [], color="blue", lw=2, label="Orbit plane")
+
+ecl_normal = ax_planes.quiver(
+    0, 0, 0,
+    n_ecl[0], n_ecl[1], n_ecl[2],
+    color="orange",
+    linewidth=2
+)
+
+orbit_normal = None
+
+ax_planes.legend()
+ax_planes.set_xlim(-1.1, 1.1)
+ax_planes.set_ylim(-1.1, 1.1)
+ax_planes.set_zlim(-1.1, 1.1)
+ax_planes.set_box_aspect([1,1,1])
+ax_planes.set_autoscale_on(False)
+
+# -- Draw plane fills 
+ecl_fill = Poly3DCollection([], alpha=0.18, color="orange")
+orb_fill = Poly3DCollection([], alpha=0.18, color="blue")
+
+ax_planes.add_collection3d(ecl_fill)
+ax_planes.add_collection3d(orb_fill)
+
+node_line, = ax_planes.plot([], [], [], color="green", lw=3, label="Line of nodes / RAAN")
+ref_line, = ax_planes.plot([-1, 1], [0, 0], [0, 0], "k--", lw=1, label="Reference X-axis")
+
+#  ----- Ecliptic fill -----
+ecl_circle = plane_disk_from_normal(n_ecl, radius=plane_radius)
+
+ecl_line.set_data(ecl_circle[:,0], ecl_circle[:,1])
+ecl_line.set_3d_properties(ecl_circle[:,2])
+
+ecl_fill.set_verts([ecl_circle])
+
 
 #Extract initial parameters
 
@@ -454,6 +640,7 @@ def update_axis_scatter(scatter, axis_hist, i, scale, cmap_name, trail_len=300):
     scatter._facecolor3d = colors
     scatter._edgecolor3d = colors
 
+
 def update(i):
     # compute position, velocities and torques
     v_vec = v[i]
@@ -495,7 +682,66 @@ def update(i):
     srp_mag = np.linalg.norm(T_srp[i])
     
 
-    global body_axes, body_axes_x, body_axes_y, body_axes_z  #,gg_quiv, srp_quiv, 
+    global body_axes, body_axes_x, body_axes_y, body_axes_z, orbit_normal
+
+    # ----------------------------
+    # update ecliptic/orbit-plane plot
+    # ----------------------------
+
+    if orbit_normal is not None:
+        orbit_normal.remove()
+
+    # orbit plane normal from current inclination and RAAN
+    n_orb = orbit_normal_from_elements(inc[i], raan[i])
+
+    # update orbit plane circle
+    orbit_circle = plane_disk_from_normal(n_orb, radius=plane_radius)
+
+    orbit_line.set_data(orbit_circle[:, 0], orbit_circle[:, 1])
+    orbit_line.set_3d_properties(orbit_circle[:, 2])
+
+    # update transparent orbit-plane fill
+    orb_fill.set_verts([orbit_circle])
+
+    # update orbit normal arrow
+    orbit_normal = ax_planes.quiver(
+        0, 0, 0,
+        n_orb[0], n_orb[1], n_orb[2],
+        color="blue",
+        linewidth=2
+    )
+
+    # line of nodes / RAAN direction
+    n_ref = np.array([0.0, 0.0, 1.0])
+    node_vec = np.cross(n_ref, n_orb)
+
+    if np.linalg.norm(node_vec) > 1e-12:
+        node_vec = node_vec / np.linalg.norm(node_vec)
+
+        node_line.set_data(
+            [-node_vec[0], node_vec[0]],
+            [-node_vec[1], node_vec[1]]
+        )
+        node_line.set_3d_properties(
+            [-node_vec[2], node_vec[2]]
+        )
+
+    # angle between orbit plane and ecliptic plane
+    angle_planes = np.rad2deg(
+        np.arccos(np.clip(np.dot(n_ecl, n_orb), -1.0, 1.0))
+    )
+
+    # slowly rotate the camera during the animation
+    azim = 30 + 360 * i / len(t)
+    elev = 25
+    ax_planes.view_init(elev=elev, azim=azim)
+
+    fig3.suptitle(
+        f"t = {t[i]/3600:.2f} h / {t[i]/3600/24:.2f} days\n"
+        f"RAAN = {np.rad2deg(raan[i]):.2f}°, "
+        f"i = {np.rad2deg(inc[i]):.3f}°, "
+        f"orbit/ecliptic angle = {angle_planes:.3f}°"
+    )
 
     R = quat_to_dcm(q[i])
 
@@ -667,20 +913,23 @@ def show_plot(hold=False, save=False):
         hold_frames = 4
         ani = FuncAnimation(fig, update, frames=len(t), interval=hold_frames*60, blit=False)
         ani2 = FuncAnimation(fig2, update, frames=len(t), interval=hold_frames*60, blit=False)
+        ani3 = FuncAnimation(fig3, update, frames=len(t), interval=hold_frames*60, blit=False)
     else:
         ani = FuncAnimation(fig, update, frames=len(t), interval=40, blit=False)
         ani2 = FuncAnimation(fig2, update, frames=len(t), interval=40, blit=False)
+        ani3 = FuncAnimation(fig3, update, frames=len(t), interval=40, blit=False)
 
     plt.tight_layout()
 
     if save:
         ani.save(outdir / f"{args.prefix}_main.mp4", fps=args.fps, dpi=args.dpi)
         ani2.save(outdir / f"{args.prefix}_axes.mp4", fps=args.fps, dpi=args.dpi)
+        ani3.save(outdir / f"{args.prefix}_planes.mp4", fps=args.fps, dpi=args.dpi)
 
-    return ani, ani2
+    return ani, ani2, ani3
 
 
-ani, ani2 = show_plot(hold=False, save=args.save)
+ani, ani2 , ani3 = show_plot(hold=False, save=args.save)
 
 if args.show:
     plt.show()
