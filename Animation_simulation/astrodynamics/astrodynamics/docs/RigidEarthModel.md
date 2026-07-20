@@ -129,3 +129,82 @@ i_M=28^\circ.
 \]
 
 The Moon is initially modeled as moving on a circular orbit.
+
+## 6. Elementary Rotation Matrices
+
+The implementation uses active, right-handed rotations acting on column
+vectors:
+
+$$
+\mathbf v' = \mathbf R\,\mathbf v.
+$$
+
+Rotation about the first axis:
+
+$$
+\mathbf R_x(\alpha)=
+\begin{bmatrix}
+1 & 0 & 0 \\
+0 & \cos\alpha & -\sin\alpha \\
+0 & \sin\alpha & \cos\alpha
+\end{bmatrix}.
+$$
+
+Rotation about the second axis:
+
+$$
+\mathbf R_y(\beta)=
+\begin{bmatrix}
+\cos\beta & 0 & \sin\beta \\
+0 & 1 & 0 \\
+-\sin\beta & 0 & \cos\beta
+\end{bmatrix}.
+$$
+
+Rotation about the third axis:
+
+$$
+\mathbf R_z(\gamma)=
+\begin{bmatrix}
+\cos\gamma & -\sin\gamma & 0 \\
+\sin\gamma & \cos\gamma & 0 \\
+0 & 0 & 1
+\end{bmatrix}.
+$$
+
+Every proper rotation matrix satisfies
+
+$$
+\mathbf R^\mathsf{T}\mathbf R=\mathbf I,
+\qquad
+\det(\mathbf R)=+1,
+\qquad
+\mathbf R^{-1}=\mathbf R^\mathsf{T}.
+$$
+
+### Matrices in the original MATLAB model
+
+The lunar-orbit inclination matrix is
+
+$$
+\mathbf A=\mathbf R_x(i_M).
+$$
+
+The sidereal-angle matrix is
+
+$$
+\mathbf B=\mathbf R_z(-\theta).
+$$
+
+The lunar position is transformed according to
+
+$$
+\mathbf r_M^{\,F}
+=
+\mathbf R_z(-\theta)
+\mathbf R_x(i_M)
+\mathbf r_M^{\,I}.
+$$
+
+The superscripts \(I\) and \(F\) denote inertial and Earth-fixed
+coordinates, respectively.
