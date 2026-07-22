@@ -29,7 +29,7 @@ def rotation_x(angle: float) -> RotationMatrix:
 
     Returns
     -------
-    numpy.ndarray
+    numpy.ndarrays
         A 3 x 3 rotation matrix.
     """
     cosine = np.cos(angle)

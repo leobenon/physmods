@@ -684,3 +684,70 @@ $$
 These values are stricter than the default tolerances and are used to
 obtain a reliable reference trajectory before comparing other
 integration methods.
+
+## 13. Derived Simulation Quantities
+
+In addition to the integrated state, several quantities are reconstructed
+at each output time.
+
+The unit rotation-axis direction in the body frame is
+
+$$
+\hat{\boldsymbol\omega}^{\,B}
+=
+\frac{
+\boldsymbol\omega^{B}
+}{
+\left\|\boldsymbol\omega^{B}\right\|
+}.
+$$
+
+The figure axis of the axisymmetric Earth is the third principal axis:
+
+$$
+\hat{\mathbf f}^{\,B}
+=
+\begin{bmatrix}
+0\\
+0\\
+1
+\end{bmatrix}.
+$$
+
+The Moon position is stored in both inertial and body-fixed coordinates:
+
+$$
+\mathbf r_M^I,
+\qquad
+\mathbf r_M^B.
+$$
+
+The normalized lunar torque is
+
+$$
+\mathbf d^B
+=
+\begin{bmatrix}
+M_1/A\\
+M_2/B\\
+M_3/C
+\end{bmatrix}.
+$$
+
+The body-frame angular acceleration is reconstructed from Euler's
+equations:
+
+$$
+\dot{\boldsymbol\omega}^{\,B}
+=
+\begin{bmatrix}
+-\gamma_1\omega_2\omega_3+d_1\\
+-\gamma_2\omega_3\omega_1+d_2\\
+-\gamma_3\omega_1\omega_2+d_3
+\end{bmatrix}.
+$$
+
+Physical torque and angular momentum are not yet stored because the
+original MATLAB model specifies inertia ratios rather than absolute
+principal moments of inertia.
+
