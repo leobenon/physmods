@@ -324,3 +324,90 @@ def test_invalid_rotation_axis_trail_length_raises_error() -> None:
         viewer.set_rotation_axis_trail_length(0)
 
     plt.close(viewer.figure)
+
+def test_trail_length_slider_updates_setting() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.trail_length_slider.set_val(2)
+
+    assert viewer.trails["rotation_axis"]["length"] == 2
+
+    plt.close(viewer.figure)
+
+def test_public_trail_length_setter_updates_slider() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.set_rotation_axis_trail_length(2)
+
+    assert viewer.trail_length_slider.val == 2
+    assert viewer.trails["rotation_axis"]["length"] == 2
+
+    plt.close(viewer.figure)
+
+def test_rotation_axis_trail_visibility_can_be_changed() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.set_rotation_axis_trail_enabled(False)
+
+    assert not viewer.visibility["rotation_axis_trail"]
+    assert not viewer.trails["rotation_axis"]["enabled"]
+
+    plt.close(viewer.figure)
+
+def test_trail_can_remain_visible_without_current_axis() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.set_visibility("rotation_axis", False)
+
+    assert not viewer.visibility["rotation_axis"]
+    assert viewer.visibility["rotation_axis_trail"]
+
+    plt.close(viewer.figure)
+
+def test_save_animation_rejects_unknown_extension(
+    tmp_path,
+) -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    with pytest.raises(ValueError, match="mp4.*gif"):
+        viewer.save_animation(
+            tmp_path / "animation.avi",
+        )
+
+    plt.close(viewer.figure)
+
+def test_save_animation_rejects_invalid_fps(
+    tmp_path,
+) -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    with pytest.raises(ValueError, match="fps must be positive"):
+        viewer.save_animation(
+            tmp_path / "animation.gif",
+            fps=0,
+        )
+
+    plt.close(viewer.figure)
+
+def test_save_animation_rejects_invalid_frame_step(
+    tmp_path,
+) -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    with pytest.raises(
+        ValueError,
+        match="frame_step must be positive",
+    ):
+        viewer.save_animation(
+            tmp_path / "animation.gif",
+            frame_step=0,
+        )
+
+    plt.close(viewer.figure)

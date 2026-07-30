@@ -1,7 +1,9 @@
 """Three-dimensional visualization of rigid-Earth rotation."""
 
 from __future__ import annotations
+from pathlib import Path
 
+from matplotlib.animation import FuncAnimation, PillowWriter,FFMpegWriter
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
@@ -361,6 +363,9 @@ class RigidEarthViewer:
         *,
         initial_index: int = 0,
         rotation_axis_exaggeration: float = 1.0e6,
+        elevation: float = 24.0,
+        azimuth: float = 38.0,
+
     ) -> None:
         self.result = result
         self.number_of_samples = result.time.size
@@ -380,6 +385,8 @@ class RigidEarthViewer:
 
         self.current_index = initial_index % self.number_of_samples
         self.rotation_axis_exaggeration = rotation_axis_exaggeration
+        self.elevation = float(elevation)
+        self.azimuth = float(azimuth)
         self.is_playing = False
         self.animation_step = 1
         self.timer_interval_ms = 50
@@ -390,6 +397,7 @@ class RigidEarthViewer:
             "rotation_axis": True,
             "moon_direction": True,
             "torque": True,
+            "rotation_axis_trail": True,
         }
 
         self.visibility_label_to_key = {
@@ -398,16 +406,36 @@ class RigidEarthViewer:
             "Rotation axis": "rotation_axis",
             "Moon direction": "moon_direction",
             "Torque": "torque",
+            "Rotation-axis trail": "rotation_axis_trail",
+        }
+
+        self.trails = {
+            "rotation_axis": {
+                "enabled": True,
+                "length": 200,
+                "color": "magenta",
+                "minimum_alpha": 0.05,
+                "maximum_alpha": 0.90,
+                "minimum_linewidth": 0.2,
+                "maximum_linewidth": 2.0,
+                "show_marker": True,
+                "marker_size": 45.0,
+            },
         }
         
         self.figure = plt.figure(figsize=(10, 9))
         self.axis = self.figure.add_subplot(111, projection="3d")
 
+        self.axis.view_init(
+            elev=self.elevation,
+            azim=self.azimuth,
+        )
+
         self.figure.subplots_adjust(
             left=0.08,
             right=0.95,
             top=0.90,
-            bottom=0.30,
+            bottom=0.35,
         )
 
         self.timer = self.figure.canvas.new_timer(
@@ -446,6 +474,32 @@ class RigidEarthViewer:
         )
 
         self.time_slider.on_changed(self._on_slider_changed)
+
+        maximum_trail_length = self.number_of_samples
+
+        initial_trail_length = min(
+            int(self.trails["rotation_axis"]["length"]),
+            maximum_trail_length,
+        )
+
+        self.trails["rotation_axis"]["length"] = initial_trail_length
+
+        self.trail_length_slider_axis = self.figure.add_axes(
+            [0.30, 0.018, 0.40, 0.025]
+        )
+
+        self.trail_length_slider = Slider(
+            ax=self.trail_length_slider_axis,
+            label="Trail length [samples]",
+            valmin=1,
+            valmax=maximum_trail_length,
+            valinit=initial_trail_length,
+            valstep=1,
+        )
+
+        self.trail_length_slider.on_changed(
+            self._on_trail_length_changed
+        )
 
         self.previous_button_axis = self.figure.add_axes(
             [0.28, 0.075, 0.10, 0.04]
@@ -487,7 +541,7 @@ class RigidEarthViewer:
         )
 
         self.speed_slider_axis = self.figure.add_axes(
-            [0.30, 0.035, 0.40, 0.025]
+            [0.30, 0.040, 0.40, 0.025]
         )
 
         self.speed_slider = Slider(
@@ -504,10 +558,10 @@ class RigidEarthViewer:
         )
 
         self.visibility_axis = self.figure.add_axes(
-            [0.79, 0.79, 0.18, 0.18]
+            [0.79, 0.75, 0.20, 0.19]
         )
 
-        number_of_controls = 5
+        number_of_controls = 6
 
         self.visibility_checkboxes = CheckButtons(
             ax=self.visibility_axis,
@@ -517,6 +571,7 @@ class RigidEarthViewer:
                 "Rotation axis",
                 "Moon direction",
                 "Torque",
+                "Rotation-axis trail",
             ],
             actives=[
                 self.visibility["body_axes"],
@@ -524,6 +579,7 @@ class RigidEarthViewer:
                 self.visibility["rotation_axis"],
                 self.visibility["moon_direction"],
                 self.visibility["torque"],
+                self.visibility["rotation_axis_trail"],
             ],
             label_props={
                 "fontsize": [12] * number_of_controls,
@@ -547,17 +603,7 @@ class RigidEarthViewer:
             self._on_visibility_changed
         )
 
-        self.trails = {
-            "rotation_axis": {
-                "enabled": True,
-                "length": 200,
-                "color": "magenta",
-                "minimum_alpha": 0.05,
-                "maximum_alpha": 0.90,
-                "minimum_linewidth": 0.2,
-                "maximum_linewidth": 2.0,
-            },
-        }
+
         
         self.legend = None
 
@@ -722,6 +768,10 @@ class RigidEarthViewer:
         key = self.visibility_label_to_key[label]
         self.visibility[key] = not self.visibility[key]
 
+        if key == "rotation_axis_trail":
+            self.trails["rotation_axis"]["enabled"] = self.visibility[key]
+
+    
         self.draw_state(self.current_index)
 
     def _on_play_pause_clicked(self, event) -> None:
@@ -798,6 +848,36 @@ class RigidEarthViewer:
             )
 
         return label
+    
+    def _draw_rotation_axis_marker(
+        self,
+        rotation_axis_display: np.ndarray,
+        *,
+        display_length: float = 1.65,
+    ) -> None:
+        """Draw a marker at the displayed rotation-axis endpoint."""
+        settings = self.trails["rotation_axis"]
+
+        if not settings["show_marker"]:
+            return
+
+        endpoint = (
+            display_length
+            * normalize_vector(rotation_axis_display)
+        )
+
+        self.axis.scatter(
+            endpoint[0],
+            endpoint[1],
+            endpoint[2],
+            s=settings["marker_size"],
+            color=settings["color"],
+            edgecolors="black",
+            linewidths=0.6,
+            depthshade=True,
+            label="_nolegend_",
+            zorder=10,
+        )
 
     def draw_state(self, sample_index: int) -> None:
         """Draw one simulation sample, replacing the previous scene."""
@@ -808,8 +888,26 @@ class RigidEarthViewer:
 
         self.current_index = sample_index
 
-        elevation = getattr(self.axis, "elev", 24.0)
-        azimuth = getattr(self.axis, "azim", 38.0)
+        elevation = getattr(self.axis, "elev", self.elevation)
+        azimuth = getattr(self.axis, "azim", self.azimuth)
+
+        psi = self.result.psi[sample_index]
+        epsilon = self.result.obliquity[sample_index]
+        theta = self.result.sidereal_angle[sample_index]
+
+        psi_degrees = np.rad2deg(psi)
+        epsilon_degrees = np.rad2deg(epsilon)
+        theta_degrees = np.rad2deg(theta)
+
+        epsilon_change_arcsec = np.rad2deg(
+            epsilon - self.result.obliquity[0]
+        ) * 3600.0
+
+        psi_change_arcsec = np.rad2deg(
+            psi - self.result.psi[0]
+        ) * 3600.0
+
+        theta_wrapped_degrees = np.rad2deg(theta) % 360.0
 
         self.axis.clear()
 
@@ -865,6 +963,11 @@ class RigidEarthViewer:
                 label=self._rotation_axis_label(),
                 linewidth=2.6,
             )
+
+            self._draw_rotation_axis_marker(
+                rotation_axis_display,
+                display_length=1.65,
+            )
         
         if self.visibility["moon_direction"]:
             draw_vector(
@@ -887,6 +990,12 @@ class RigidEarthViewer:
                 normalization_tolerance=1.0e-20,
             )
 
+        if self.visibility["rotation_axis_trail"]:
+            self._draw_rotation_axis_trail(sample_index)
+
+
+            
+
         time_days = self.result.time_days[sample_index]
         angular_velocity = (
             self.result.angular_velocity_body[sample_index]
@@ -900,6 +1009,8 @@ class RigidEarthViewer:
             f"Time = {time_days:.3f} days"
         )
 
+        trail_length = self.trails["rotation_axis"]["length"]
+
         self.information_text.set_text(
             rf"$\omega_B=$ "
             f"[{angular_velocity[0]:.3e}, "
@@ -908,7 +1019,14 @@ class RigidEarthViewer:
             rf"$d_B=$ "
             f"[{normalized_torque[0]:.3e}, "
             f"{normalized_torque[1]:.3e}, "
-            f"{normalized_torque[2]:.3e}] s$^{{-2}}$"
+            f"{normalized_torque[2]:.3e}] s$^{{-2}}$\n"
+            f"Trail length = {trail_length} samples\n"
+            rf"$\psi={psi_degrees:.6f}^\circ$" f"\n"
+            rf"$\epsilon={epsilon_degrees:.6f}^\circ$" f"\n"
+            rf"$\theta={theta_wrapped_degrees:.3f}^\circ$, $\theta_{{tot}}={theta_degrees:.3f}^\circ$" f"\n"
+            rf"$\Delta\psi={psi_change_arcsec:.3f}$ arcsec" f"\n"
+            rf"$\Delta\epsilon={epsilon_change_arcsec:.3f}$ arcsec" f"\n"
+
         )
 
         if self.legend is not None:
@@ -922,7 +1040,7 @@ class RigidEarthViewer:
                 handles,
                 labels,
                 loc="upper left",
-                bbox_to_anchor=(0.001, 0.90),
+                bbox_to_anchor=(0.001, 0.78),
                 fontsize=9,
             )
 
@@ -960,6 +1078,14 @@ class RigidEarthViewer:
 
         if sample_index != self.current_index:
             self.draw_state(sample_index)
+
+    def _on_trail_length_changed(
+        self,
+        value: float,
+    ) -> None:
+        """Update the rotation-axis trail length."""
+        self.trails["rotation_axis"]["length"] = int(round(value))
+        self.draw_state(self.current_index)
 
     def set_index(self, sample_index: int) -> None:
         """Display a specific stored output sample."""
@@ -1001,14 +1127,160 @@ class RigidEarthViewer:
         """Open the interactive Matplotlib window."""
         plt.show()
 
+    def save_animation(
+        self,
+        filename: str | Path,
+        *,
+        fps: int = 30,
+        start_index: int = 0,
+        end_index: int | None = None,
+        frame_step: int = 1,
+        dpi: int = 150,
+        close_figure: bool = True,
+    ) -> Path:
+        """Save the viewer animation as MP4 or GIF.
+
+        Parameters
+        ----------
+        filename
+            Output filename ending in ``.mp4`` or ``.gif``.
+        fps
+            Number of displayed frames per second.
+        start_index
+            First stored simulation sample to export.
+        end_index
+            Stop index, excluded. ``None`` uses all remaining samples.
+        frame_step
+            Export every nth stored simulation sample.
+        dpi
+            Output resolution in dots per inch.
+
+        Returns
+        -------
+        pathlib.Path
+            Path of the saved animation.
+        """
+        
+        output_path = Path(filename)
+
+        if not output_path.is_absolute() and output_path.parent == Path("."):
+            output_directory = Path("astrodynamics/outputs") / "animations"
+            output_directory.mkdir(parents=True, exist_ok=True)
+            output_path = output_directory / output_path
+
+
+        if fps <= 0:
+            raise ValueError("fps must be positive.")
+
+        if frame_step <= 0:
+            raise ValueError("frame_step must be positive.")
+
+        if not 0 <= start_index < self.number_of_samples:
+            raise IndexError(
+                "start_index is outside the valid sample range."
+            )
+
+        if end_index is None:
+            end_index = self.number_of_samples
+
+        if not start_index < end_index <= self.number_of_samples:
+            raise IndexError(
+                "end_index must be greater than start_index and "
+                "within the available sample range."
+            )
+
+        suffix = output_path.suffix.lower()
+
+        if suffix not in {".mp4", ".gif"}:
+            raise ValueError(
+                "filename must end with '.mp4' or '.gif'."
+            )
+
+        frame_indices = range(
+            start_index,
+            end_index,
+            frame_step,
+        )
+
+        number_of_frames = len(frame_indices)
+        duration_seconds = number_of_frames / fps
+
+        
+        print(f"Exporting {number_of_frames} frames " f"({duration_seconds:.1f} s at {fps} fps) " f"to {output_path}")
+
+        original_index = self.current_index
+        was_playing = self.is_playing
+
+        self.pause()
+
+        def update_frame(sample_index: int):
+            self.draw_state(sample_index)
+            return ()
+
+        animation = FuncAnimation(
+            self.figure,
+            update_frame,
+            frames=frame_indices,
+            interval=1000.0 / fps,
+            blit=False,
+            repeat=False,
+        )
+
+        try:
+            if suffix == ".gif":
+                writer = PillowWriter(fps=fps)
+            else:
+                writer = FFMpegWriter(
+                    fps=fps,
+                    metadata={
+                        "title": "Rigid Earth Rotation",
+                        "artist": "astrodynamics",
+                    },
+                )
+
+            animation.save(
+                output_path,
+                writer=writer,
+                dpi=dpi,
+            )
+            if close_figure:
+                plt.close(self.figure)
+            
+
+            print(f"Animation saved to:\n{output_path.resolve()}")
+
+        finally:
+            self.draw_state(original_index)
+
+            self.time_slider.set_val(
+                float(self.result.time_days[original_index])
+            )
+
+            if was_playing:
+                self.play()
+
+        return output_path
+    
+        
+
 
     def set_rotation_axis_trail_enabled(
         self,
         enabled: bool,
     ) -> None:
-        """Enable or disable the rotation-axis trail."""
-        self.trails["rotation_axis"]["enabled"] = bool(enabled)
-        self.draw_state(self.current_index)
+        """Show or hide the rotation-axis trail."""
+        enabled = bool(enabled)
+
+        if self.visibility["rotation_axis_trail"] == enabled:
+            return
+
+        checkbox_index = list(
+            self.visibility_label_to_key.values()
+        ).index("rotation_axis_trail")
+
+        self.visibility_checkboxes.set_active(
+            checkbox_index
+        )
 
     def set_rotation_axis_trail_length(
         self,
@@ -1021,8 +1293,32 @@ class RigidEarthViewer:
         if length < 1:
             raise ValueError("length must be at least 1.")
 
-        self.trails["rotation_axis"]["length"] = int(length)
-        self.draw_state(self.current_index)
+        maximum_length = int(self.trail_length_slider.valmax)
+
+        if length > maximum_length:
+            raise ValueError(
+                f"length cannot exceed the number of available "
+                f"samples ({maximum_length})."
+            )
+
+        self.trail_length_slider.set_val(length)
+
+    def set_view(
+        self,
+        *,
+        elevation: float,
+        azimuth: float,
+    ) -> None:
+        """Set the current camera orientation."""
+        self.elevation = float(elevation)
+        self.azimuth = float(azimuth)
+
+        self.axis.view_init(
+            elev=self.elevation,
+            azim=self.azimuth,
+        )
+
+        self.figure.canvas.draw_idle()
 
 def interactive_rigid_earth_state_3d(
     result: SimulationResult,

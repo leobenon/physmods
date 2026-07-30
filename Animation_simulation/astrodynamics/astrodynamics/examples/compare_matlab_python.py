@@ -56,7 +56,7 @@ def interpolate_state(
 
 def main() -> None:
     python_time, python_state = load_result(
-        "/Users/rukan1/Desktop/physmods/Animation_simulation/astrodynamics/astrodynamics/output/rigid_earth_python.csv"
+        "/Users/rukan1/Desktop/physmods/Animation_simulation/astrodynamics/astrodynamics/outputs/rigid_earth_python.csv"
     )
     matlab_time, matlab_state = load_result(
         "/Users/rukan1/Desktop/AA/astrodynamik/Astrodynamik 2 /rigid_earth_matlab.csv"

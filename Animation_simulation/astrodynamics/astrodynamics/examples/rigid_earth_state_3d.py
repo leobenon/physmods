@@ -17,11 +17,14 @@ def main() -> None:
         initial_index=0,
         rotation_axis_exaggeration=1.0e6,
     )
-
+    viewer.set_view(elevation=25.0,azimuth=50.0)
     viewer.set_playback_speed(15.0)
-    viewer.set_rotation_axis_trail_length(1000)
+    viewer.set_rotation_axis_trail_length(1500)
     viewer.set_rotation_axis_trail_enabled(True)
+    #viewer.save_animation("rigid_earth.gif",fps=30, start_index=600 , end_index=1600,frame_step=5,dpi=130,close_figure=True)
+
     viewer.show()
+    
 
 
 if __name__ == "__main__":
