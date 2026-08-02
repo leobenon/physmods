@@ -284,11 +284,39 @@ def test_rotation_axis_trail_points_have_correct_shape() -> None:
     result = short_result()
     viewer = RigidEarthViewer(result)
 
-    points = viewer._rotation_axis_trail_points(
-        result.time.size - 1
+    points = viewer._axis_trail_points(
+        result.time.size - 1,
+        vector_key="rotation_axis",
+        settings_key="rotation_axis",
+        exaggeration_factor=viewer.rotation_axis_exaggeration,
+        display_length=1.65,
     )
 
-    assert points.shape == (result.time.size, 3)
+    assert points.shape == (
+        result.time.size,
+        3,
+    )
+
+    plt.close(viewer.figure)
+
+def test_angular_momentum_trail_points_have_correct_shape() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    points = viewer._axis_trail_points(
+        result.time.size - 1,
+        vector_key="angular_momentum_axis",
+        settings_key="angular_momentum_axis",
+        exaggeration_factor=(
+            viewer.angular_momentum_axis_exaggeration
+        ),
+        display_length=1.58,
+    )
+
+    assert points.shape == (
+        result.time.size,
+        3,
+    )
 
     plt.close(viewer.figure)
 
@@ -298,8 +326,12 @@ def test_rotation_axis_trail_length_is_limited() -> None:
 
     viewer.set_rotation_axis_trail_length(2)
 
-    points = viewer._rotation_axis_trail_points(
-        result.time.size - 1
+    points = viewer._axis_trail_points(
+        result.time.size - 1,
+        vector_key="rotation_axis",
+        settings_key="rotation_axis",
+        exaggeration_factor=viewer.rotation_axis_exaggeration,
+        display_length=1.65,
     )
 
     assert points.shape == (2, 3)
@@ -409,5 +441,76 @@ def test_save_animation_rejects_invalid_frame_step(
             tmp_path / "animation.gif",
             frame_step=0,
         )
+
+    plt.close(viewer.figure)
+
+def test_scene_vectors_are_returned_in_body_frame() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    vectors = viewer._scene_vectors(0)
+
+    assert set(vectors) == {
+        "body_axes",
+        "figure_axis",
+        "rotation_axis",
+        "angular_momentum_axis",
+        "moon_direction",
+        "torque",
+    }
+
+    assert np.allclose(
+        vectors["rotation_axis"],
+        result.rotation_axis_body[0],
+    )
+    assert np.allclose(
+        vectors["angular_momentum_axis"],
+        result.angular_momentum_axis_body[0],
+    )
+
+    plt.close(viewer.figure)
+
+def test_body_reference_frame_can_be_selected() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.set_reference_frame("body")
+
+    assert viewer.reference_frame == "body"
+
+    plt.close(viewer.figure)
+
+def test_inertial_reference_frame_can_be_selected() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.set_reference_frame("inertial")
+
+    assert viewer.reference_frame == "inertial"
+
+    plt.close(viewer.figure)
+
+def test_unsupported_reference_frame_raises_error() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    with pytest.raises(ValueError, match="reference_frame"):
+        viewer.set_reference_frame("unknown")
+
+    plt.close(viewer.figure)
+
+def test_inertial_scene_vectors_have_correct_shape() -> None:
+    result = short_result()
+    viewer = RigidEarthViewer(result)
+
+    viewer.set_reference_frame("inertial")
+    vectors = viewer._scene_vectors(0)
+
+    assert vectors["body_axes"].shape == (3, 3)
+    assert vectors["figure_axis"].shape == (3,)
+    assert vectors["rotation_axis"].shape == (3,)
+    assert vectors["angular_momentum_axis"].shape == (3,)
+    assert vectors["moon_direction"].shape == (3,)
+    assert vectors["torque"].shape == (3,)
 
     plt.close(viewer.figure)

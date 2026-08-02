@@ -3,12 +3,22 @@
 import numpy as np
 import pytest
 
+
 from astrodynamics.bodies.earth import EARTH
 from astrodynamics.constants import SECONDS_PER_DAY, SECONDS_PER_HOUR
 from astrodynamics.simulation import (
     default_initial_state,
     simulate_rigid_earth,
 )
+
+
+def short_result():
+    """Return a small simulation result for derived-history tests."""
+    return simulate_rigid_earth(
+        duration_days=0.01,
+        output_step=300.0,
+        max_step=300.0,
+    )
 
 
 def test_default_initial_state_matches_matlab() -> None:
@@ -146,3 +156,63 @@ def test_invalid_initial_state_shape_raises_error() -> None:
             duration_days=0.1,
             initial_state=np.zeros(5),
         )
+def test_angular_momentum_axis_has_unit_norm() -> None:
+    result = short_result()
+
+    momentum_magnitudes = np.linalg.norm(
+        result.angular_momentum_body,
+        axis=1,
+    )
+
+    axis_norms = np.linalg.norm(
+        result.angular_momentum_axis_body,
+        axis=1,
+    )
+
+    nonzero = momentum_magnitudes > 0.0
+
+    assert np.allclose(
+        axis_norms[nonzero],
+        1.0,
+        atol=1.0e-14,
+    )
+
+def test_angular_momentum_matches_inertia_times_omega() -> None:
+    result = short_result()
+
+    expected = (
+        result.angular_velocity_body
+        * EARTH.principal_moments
+    )
+
+    assert np.allclose(
+        result.angular_momentum_body,
+        expected,
+        rtol=1.0e-14,
+        atol=0.0,
+    )
+
+def test_rotation_and_momentum_axes_differ_when_transverse_spin_exists() -> None:
+    result = short_result()
+
+    angular_velocity = result.angular_velocity_body
+
+    expected_momentum = (
+        angular_velocity * EARTH.principal_moments
+    )
+
+    expected_axis = (
+        expected_momentum
+        / np.linalg.norm(
+            expected_momentum,
+            axis=1,
+            keepdims=True,
+        )
+    )
+
+    assert np.allclose(
+        result.angular_momentum_axis_body,
+        expected_axis,
+        rtol=1.0e-14,
+        atol=1.0e-15,
+    )

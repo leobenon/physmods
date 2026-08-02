@@ -39,6 +39,8 @@ class SimulationResult:
     normalized_lunar_torque: VectorHistory
     angular_acceleration_body: VectorHistory
     rotation_axis_body: VectorHistory
+    angular_momentum_body: VectorHistory
+    angular_momentum_axis_body: VectorHistory
     figure_axis_body: VectorHistory
 
     success: bool
@@ -191,6 +193,8 @@ def simulate_rigid_earth(
         normalized_lunar_torque,
         angular_acceleration_body,
         rotation_axis_body,
+        angular_momentum_body,
+        angular_momentum_axis_body,
         figure_axis_body,
     ) = compute_derived_histories(
         time=solution.t,
@@ -207,6 +211,8 @@ def simulate_rigid_earth(
         normalized_lunar_torque=normalized_lunar_torque,
         angular_acceleration_body=angular_acceleration_body,
         rotation_axis_body=rotation_axis_body,
+        angular_momentum_body=angular_momentum_body,
+        angular_momentum_axis_body=angular_momentum_axis_body,
         figure_axis_body=figure_axis_body,
         success=solution.success,
         message=solution.message,
@@ -227,6 +233,8 @@ def save_simulation_csv(
             result.normalized_lunar_torque,
             result.angular_acceleration_body,
             result.rotation_axis_body,
+            result.angular_momentum_body,
+            result.angular_momentum_axis_body,
             result.figure_axis_body,
         ]
     )
@@ -254,6 +262,12 @@ def save_simulation_csv(
         "rotation_axis_body_x,"
         "rotation_axis_body_y,"
         "rotation_axis_body_z,"
+        "angular_momentum_body_x,"
+        "angular_momentum_body_y,"
+        "angular_momentum_body_z,"
+        "angular_momentum_axis_body_x,"
+        "angular_momentum_axis_body_y,"
+        "angular_momentum_axis_body_z,"
         "figure_axis_body_x,"
         "figure_axis_body_y,"
         "figure_axis_body_z"
@@ -267,6 +281,8 @@ def save_simulation_csv(
         comments="",
     )
 
+
+
 def compute_derived_histories(
     time: NDArray[np.floating],
     state: NDArray[np.floating],
@@ -274,6 +290,8 @@ def compute_derived_histories(
     earth: EarthParameters = EARTH,
     moon: Moon = MOON,
 ) -> tuple[
+    VectorHistory,
+    VectorHistory,
     VectorHistory,
     VectorHistory,
     VectorHistory,
@@ -293,7 +311,9 @@ def compute_derived_histories(
         3. Normalized lunar torque
         4. Body-frame angular acceleration
         5. Body-frame rotation-axis direction
-        6. Body-frame figure-axis direction
+        6. Body-frame angular momentum
+        7. Body-frame angular-momentum-axis direction
+        8. Body-frame figure-axis direction
     """
     time = np.asarray(time, dtype=float)
     state = np.asarray(state, dtype=float)
@@ -329,12 +349,23 @@ def compute_derived_histories(
     rotation_axis_body = np.empty_like(
         moon_position_inertial
     )
+    angular_momentum_body = np.empty_like(
+        moon_position_inertial
+    )
+
+    angular_momentum_axis_body = np.empty_like(
+        moon_position_inertial
+    )
+    
+    principal_moments = earth.principal_moments
 
     # In the body-fixed principal-axis frame, the figure axis is e3.
     figure_axis_body = np.tile(
         np.array([0.0, 0.0, 1.0]),
         (number_of_samples, 1),
     )
+
+    
 
     for index, current_time in enumerate(time):
         angular_velocity = state[index, :3]
@@ -386,11 +417,29 @@ def compute_derived_histories(
                 angular_velocity / angular_speed
             )
 
+        angular_momentum_body[index] = (
+            principal_moments * angular_velocity
+        )
+
+        angular_momentum_magnitude = np.linalg.norm(
+            angular_momentum_body[index]
+        )
+
+        if angular_momentum_magnitude == 0.0:
+            angular_momentum_axis_body[index] = np.zeros(3)
+        else:
+            angular_momentum_axis_body[index] = (
+                angular_momentum_body[index]
+                / angular_momentum_magnitude
+            )
+
     return (
         moon_position_inertial,
         moon_position_body,
         normalized_lunar_torque,
         angular_acceleration_body,
         rotation_axis_body,
+        angular_momentum_body,
+        angular_momentum_axis_body,
         figure_axis_body,
     )

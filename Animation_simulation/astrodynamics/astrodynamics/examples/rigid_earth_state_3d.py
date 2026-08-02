@@ -15,8 +15,12 @@ def main() -> None:
     viewer = RigidEarthViewer(
         result,
         initial_index=0,
-        rotation_axis_exaggeration=1.0e6,
+        rotation_axis_exaggeration=1.0e6 ,
+        angular_momentum_axis_exaggeration=10.0e5,
+        figure_axis_exaggeration=1.0e5,
     )
+
+    viewer.set_reference_frame("inertial")
     viewer.set_view(elevation=25.0,azimuth=50.0)
     viewer.set_playback_speed(15.0)
     viewer.set_rotation_axis_trail_length(1500)

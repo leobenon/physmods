@@ -13,7 +13,7 @@ from matplotlib.widgets import Button, CheckButtons, Slider
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from matplotlib.colors import to_rgba
 
-
+from astrodynamics.frames.euler import (body_to_inertial_euler_dcm,)
 from astrodynamics.simulation import SimulationResult
 
 
@@ -99,47 +99,42 @@ def draw_vector(
 def draw_body_axes(
     axis: Axes3D,
     *,
+    directions: np.ndarray | None = None,
     length: float = 1.35,
 ) -> None:
-    """Draw the body-fixed principal axes."""
-    axis.quiver(
-        0.0,
-        0.0,
-        0.0,
-        length,
-        0.0,
-        0.0,
-        arrow_length_ratio=0.08,
-        linewidth=1.2,
-        label=r"$\mathbf{e}_1^B$",
-        color = "red",
-    )
+    """Draw the body-fixed principal axes in the selected frame."""
+    if directions is None:
+        directions = np.eye(3)
 
-    axis.quiver(
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        length,
-        0.0,
-        arrow_length_ratio=0.08,
-        linewidth=1.2,
-        label=r"$\mathbf{e}_2^B$",
-        color = "green",
-    )
+    directions = np.asarray(directions, dtype=float)
 
-    axis.quiver(
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        length,
-        arrow_length_ratio=0.08,
-        linewidth=1.2,
-        label=r"$\mathbf{e}_3^B$",
-        color = "blue",
-    )
+    if directions.shape != (3, 3):
+        raise ValueError(
+            "directions must have shape (3, 3)."
+        )
+
+    labels = [
+        r"$\mathbf{e}_1^B$",
+        r"$\mathbf{e}_2^B$",
+        r"$\mathbf{e}_3^B$",
+    ]
+
+    colors = [
+        "red",
+        "green",
+        "blue",
+    ]
+
+    for index in range(3):
+        draw_vector(
+            axis,
+            directions[:, index],
+            length=length,
+            label=labels[index],
+            color=colors[index],
+            linewidth=1.2,
+            arrow_length_ratio=0.08,
+        )
 
 
 def draw_oblate_earth(
@@ -363,10 +358,15 @@ class RigidEarthViewer:
         *,
         initial_index: int = 0,
         rotation_axis_exaggeration: float = 1.0e6,
+        angular_momentum_axis_exaggeration: float | None = None,
+        figure_axis_exaggeration: float = 1.0e4,
         elevation: float = 24.0,
         azimuth: float = 38.0,
 
     ) -> None:
+        
+        self.reference_frame = "body"
+        
         self.result = result
         self.number_of_samples = result.time.size
 
@@ -382,6 +382,29 @@ class RigidEarthViewer:
             raise ValueError(
                 "rotation_axis_exaggeration must be positive."
             )
+        
+        if angular_momentum_axis_exaggeration is None:
+            angular_momentum_axis_exaggeration = (
+                rotation_axis_exaggeration
+            )
+
+        if angular_momentum_axis_exaggeration <= 0.0:
+            raise ValueError(
+                "angular_momentum_axis_exaggeration must be positive."
+            )
+
+        self.angular_momentum_axis_exaggeration = float(
+            angular_momentum_axis_exaggeration
+        )
+
+        if figure_axis_exaggeration <= 0.0:
+            raise ValueError(
+                "figure_axis_exaggeration must be positive."
+            )
+
+        self.figure_axis_exaggeration = float(
+            figure_axis_exaggeration
+        )
 
         self.current_index = initial_index % self.number_of_samples
         self.rotation_axis_exaggeration = rotation_axis_exaggeration
@@ -395,35 +418,65 @@ class RigidEarthViewer:
             "body_axes": True,
             "figure_axis": True,
             "rotation_axis": True,
+            "angular_momentum_axis": True,
             "moon_direction": True,
             "torque": True,
             "rotation_axis_trail": True,
+            "angular_momentum_trail": True,
+            "figure_axis_trail": True,
         }
 
         self.visibility_label_to_key = {
             "Body axes": "body_axes",
             "Figure axis": "figure_axis",
             "Rotation axis": "rotation_axis",
+            "Angular momentum": "angular_momentum_axis",
             "Moon direction": "moon_direction",
             "Torque": "torque",
             "Rotation-axis trail": "rotation_axis_trail",
+            "Momentum-axis trail": "angular_momentum_trail",
+            "Figure-axis trail": "figure_axis_trail",
+
         }
+
 
         self.trails = {
             "rotation_axis": {
                 "enabled": True,
-                "length": 200,
+                "length": 1500,
                 "color": "magenta",
                 "minimum_alpha": 0.05,
                 "maximum_alpha": 0.90,
-                "minimum_linewidth": 0.2,
-                "maximum_linewidth": 2.0,
+                "minimum_linewidth": 0.3,
+                "maximum_linewidth": 1.8,
                 "show_marker": True,
                 "marker_size": 45.0,
             },
+            "angular_momentum_axis": {
+                "enabled": True,
+                "length": 1500,
+                "color": "cyan",
+                "minimum_alpha": 0.05,
+                "maximum_alpha": 0.90,
+                "minimum_linewidth": 0.3,
+                "maximum_linewidth": 1.8,
+                "show_marker": True,
+                "marker_size": 40.0,
+            },
+            "figure_axis": {
+            "enabled": True,
+            "length": 1500,
+            "color": "black",
+            "minimum_alpha": 0.05,
+            "maximum_alpha": 0.90,
+            "minimum_linewidth": 0.3,
+            "maximum_linewidth": 1.8,
+            "show_marker": True,
+            "marker_size": 40.0,
+        },
         }
         
-        self.figure = plt.figure(figsize=(10, 9))
+        self.figure = plt.figure(figsize=(13, 8))
         self.axis = self.figure.add_subplot(111, projection="3d")
 
         self.axis.view_init(
@@ -446,7 +499,7 @@ class RigidEarthViewer:
 
         self.information_text = self.figure.text(
             0.01,
-            0.94,
+            0.98,
             "",
             fontsize=9,
             family="monospace",
@@ -558,29 +611,39 @@ class RigidEarthViewer:
         )
 
         self.visibility_axis = self.figure.add_axes(
-            [0.79, 0.75, 0.20, 0.19]
+            [0.76, 0.78, 0.235, 0.19]
         )
 
-        number_of_controls = 6
+        visibility_labels = [
+            "Body axes",
+            "Figure axis",
+            "Rotation axis",
+            "Angular momentum",
+            "Moon direction",
+            "Torque",
+            "Rotation-axis trail",
+            "Momentum-axis trail",
+            "Figure-axis trail",
+        ]
+
+        visibility_actives = [
+            self.visibility["body_axes"],
+            self.visibility["figure_axis"],
+            self.visibility["rotation_axis"],
+            self.visibility["angular_momentum_axis"],
+            self.visibility["moon_direction"],
+            self.visibility["torque"],
+            self.visibility["rotation_axis_trail"],
+            self.visibility["angular_momentum_trail"],
+            self.visibility["figure_axis_trail"],
+        ]
+
+        number_of_controls = len(visibility_labels)
 
         self.visibility_checkboxes = CheckButtons(
             ax=self.visibility_axis,
-            labels=[
-                "Body axes",
-                "Figure axis",
-                "Rotation axis",
-                "Moon direction",
-                "Torque",
-                "Rotation-axis trail",
-            ],
-            actives=[
-                self.visibility["body_axes"],
-                self.visibility["figure_axis"],
-                self.visibility["rotation_axis"],
-                self.visibility["moon_direction"],
-                self.visibility["torque"],
-                self.visibility["rotation_axis_trail"],
-            ],
+            labels=visibility_labels,
+            actives=visibility_actives,
             label_props={
                 "fontsize": [12] * number_of_controls,
             },
@@ -609,62 +672,132 @@ class RigidEarthViewer:
 
         self.draw_state(self.current_index)
 
-    def _rotation_axis_trail_points(
+    def _initial_figure_axis_inertial(self) -> np.ndarray:
+        """Return the initial physical figure axis in inertial coordinates."""
+        body_to_inertial = self._body_to_inertial_dcm(0)
+
+        return normalize_vector(
+            body_to_inertial
+            @ self.result.figure_axis_body[0]
+        )
+
+    def _body_to_inertial_dcm(
+        self,
+        sample_index: int,
+    ) -> np.ndarray:
+        """Return the Earth body-to-inertial DCM at one sample."""
+        return body_to_inertial_euler_dcm(
+            psi=float(self.result.psi[sample_index]),
+            epsilon=float(self.result.obliquity[sample_index]),
+            theta=float(self.result.sidereal_angle[sample_index]),
+        )
+
+    def _axis_trail_points(
         self,
         sample_index: int,
         *,
-        display_length: float = 1.65,
+        vector_key: str,
+        settings_key: str,
+        exaggeration_factor: float,
+        display_length: float,
+        reference_mode: str = "instantaneous_figure_axis",
     ) -> np.ndarray:
-        """Return displayed rotation-axis endpoints up to one sample."""
-        trail_settings = self.trails["rotation_axis"]
-        trail_length = int(trail_settings["length"])
+        """Return displayed endpoints for one axis trail."""
+        trail_length = int(
+            self.trails[settings_key]["length"]
+        )
 
         start_index = max(
             0,
             sample_index - trail_length + 1,
         )
 
+        valid_reference_modes = {
+            "initial_inertial_figure_axis",
+            "instantaneous_figure_axis",
+        }
+
+        if reference_mode not in valid_reference_modes:
+            raise ValueError(
+                f"Unsupported reference_mode: "
+                f"{reference_mode!r}."
+            )
+
+        initial_reference_axis = None
+
+        if reference_mode == "initial_inertial_figure_axis":
+            initial_reference_axis = (
+                self._initial_figure_axis_inertial()
+            )
+
         points = []
 
         for index in range(start_index, sample_index + 1):
-            physical_axis = self.result.rotation_axis_body[index]
-            figure_axis = self.result.figure_axis_body[index]
+            vectors = self._scene_vectors(index)
+            physical_axis = vectors[vector_key]
 
-            displayed_axis = exaggerate_direction(
-                direction=physical_axis,
-                reference_axis=figure_axis,
-                factor=self.rotation_axis_exaggeration,
+            if reference_mode == "initial_inertial_figure_axis":
+                displayed_axis = exaggerate_direction(
+                    direction=physical_axis,
+                    reference_axis=initial_reference_axis,
+                    factor=exaggeration_factor,
+                )
+
+            else:
+                figure_axis = vectors["figure_axis"]
+
+                if self.reference_frame == "body":
+                    displayed_axis = exaggerate_direction(
+                        direction=physical_axis,
+                        reference_axis=figure_axis,
+                        factor=exaggeration_factor,
+                    )
+                else:
+                    displayed_axis = normalize_vector(
+                        physical_axis
+                    )
+
+            points.append(
+                display_length * displayed_axis
             )
-
-            points.append(display_length * displayed_axis)
 
         return np.asarray(points, dtype=float)
     
-    def _draw_rotation_axis_trail(
+    def _draw_axis_trail(
         self,
         sample_index: int,
+        *,
+        vector_key: str,
+        settings_key: str,
+        exaggeration_factor: float,
+        display_length: float,
+        label: str,
+        reference_mode: str = "instantaneous_figure_axis",
     ) -> None:
-        """Draw a fading history of the displayed rotation axis."""
-        trail_settings = self.trails["rotation_axis"]
+        """Draw a fading, variable-width axis trail."""
+        settings = self.trails[settings_key]
 
-        if not trail_settings["enabled"]:
+        if not settings["enabled"]:
             return
 
-        points = self._rotation_axis_trail_points(sample_index)
+        points = self._axis_trail_points(
+            sample_index,
+            vector_key=vector_key,
+            settings_key=settings_key,
+            exaggeration_factor=exaggeration_factor,
+            display_length=display_length,
+            reference_mode=reference_mode,
+        )
 
         if points.shape[0] < 2:
             return
 
         segments = np.stack(
-            [
-                points[:-1],
-                points[1:],
-            ],
+            [points[:-1], points[1:]],
             axis=1,
         )
 
         number_of_segments = segments.shape[0]
-
 
         fade_fraction = np.linspace(
             0.0,
@@ -673,42 +806,41 @@ class RigidEarthViewer:
         )
 
         alpha_values = (
-            trail_settings["minimum_alpha"]
+            settings["minimum_alpha"]
             + (
-                trail_settings["maximum_alpha"]
-                - trail_settings["minimum_alpha"]
+                settings["maximum_alpha"]
+                - settings["minimum_alpha"]
             )
             * fade_fraction**2
         )
 
         linewidth_values = (
-            trail_settings["minimum_linewidth"]
+            settings["minimum_linewidth"]
             + (
-                trail_settings["maximum_linewidth"]
-                - trail_settings["minimum_linewidth"]
+                settings["maximum_linewidth"]
+                - settings["minimum_linewidth"]
             )
             * fade_fraction**2
         )
 
         base_color = np.array(
-            to_rgba(trail_settings["color"])
+            to_rgba(settings["color"])
         )
 
         segment_colors = np.tile(
             base_color,
             (number_of_segments, 1),
         )
-
         segment_colors[:, 3] = alpha_values
 
-        trail_collection = Line3DCollection(
+        collection = Line3DCollection(
             segments,
             colors=segment_colors,
             linewidths=linewidth_values,
-            label="Rotation-axis trail",
+            label=label,
         )
 
-        self.axis.add_collection3d(trail_collection)
+        self.axis.add_collection3d(collection)
 
     def _on_speed_changed(
         self,
@@ -790,9 +922,20 @@ class RigidEarthViewer:
         """Configure labels, limits, and camera orientation."""
         set_axes_equal_3d(self.axis)
 
-        self.axis.set_xlabel(r"$x_B$")
-        self.axis.set_ylabel(r"$y_B$")
-        self.axis.set_zlabel(r"$z_B$")
+        frame_suffix = {
+            "body": "B",
+            "inertial": "I",
+        }[self.reference_frame]
+
+        self.axis.set_xlabel(
+            rf"$x_{{{frame_suffix}}}$"
+        )
+        self.axis.set_ylabel(
+            rf"$y_{{{frame_suffix}}}$"
+        )
+        self.axis.set_zlabel(
+            rf"$z_{{{frame_suffix}}}$"
+        )
 
         self.axis.view_init(
             elev=elevation,
@@ -842,35 +985,43 @@ class RigidEarthViewer:
         """Return the rotation-axis legend label."""
         label = r"Rotation axis $\hat{\omega}$"
 
-        if self.rotation_axis_exaggeration != 1.0:
+        if (
+            self.reference_frame == "body"
+            and self.rotation_axis_exaggeration != 1.0
+        ):
             label += (
                 f" (tilt ×{self.rotation_axis_exaggeration:.0e})"
             )
 
         return label
     
-    def _draw_rotation_axis_marker(
+    def _draw_axis_marker(
         self,
-        rotation_axis_display: np.ndarray,
+        axis_display: np.ndarray,
         *,
-        display_length: float = 1.65,
+        settings_key: str,
+        display_length: float,
     ) -> None:
-        """Draw a marker at the displayed rotation-axis endpoint."""
-        settings = self.trails["rotation_axis"]
+        """Draw a marker at a displayed axis endpoint."""
+        settings = self.trails[settings_key]
 
         if not settings["show_marker"]:
             return
 
-        endpoint = (
-            display_length
-            * normalize_vector(rotation_axis_display)
-        )
+        direction = normalize_vector(axis_display)
+
+        if np.allclose(direction, 0.0):
+            return
+
+        endpoint = display_length * direction
+
+        marker_size = float(settings["marker_size"])
 
         self.axis.scatter(
-            endpoint[0],
-            endpoint[1],
-            endpoint[2],
-            s=settings["marker_size"],
+            float(endpoint[0]),
+            float(endpoint[1]),
+            float(endpoint[2]),
+            s=marker_size,
             color=settings["color"],
             edgecolors="black",
             linewidths=0.6,
@@ -879,6 +1030,78 @@ class RigidEarthViewer:
             zorder=10,
         )
 
+    def _scene_vectors(
+        self,
+        sample_index: int,
+    ) -> dict[str, np.ndarray]:
+        """Return scene vectors in the selected reference frame."""
+        if not 0 <= sample_index < self.number_of_samples:
+            raise IndexError(
+                f"sample_index {sample_index} is outside the valid range."
+            )
+
+        if self.reference_frame == "body":
+            return {
+                "body_axes": np.eye(3),
+                "figure_axis": (
+                    self.result.figure_axis_body[sample_index]
+                ),
+                "rotation_axis": (
+                    self.result.rotation_axis_body[sample_index]
+                ),
+                "angular_momentum_axis": (
+                    self.result.angular_momentum_axis_body[
+                        sample_index
+                    ]
+                ),
+                "moon_direction": (
+                    self.result.moon_position_body[sample_index]
+                ),
+                "torque": (
+                    self.result.normalized_lunar_torque[
+                        sample_index
+                    ]
+                ),
+            }
+
+        if self.reference_frame == "inertial":
+            body_to_inertial = self._body_to_inertial_dcm(
+                sample_index
+            )
+
+            return {
+                "body_axes": body_to_inertial,
+                "figure_axis": (
+                    body_to_inertial
+                    @ self.result.figure_axis_body[sample_index]
+                ),
+                "rotation_axis": (
+                    body_to_inertial
+                    @ self.result.rotation_axis_body[sample_index]
+                ),
+                "angular_momentum_axis": (
+                    body_to_inertial
+                    @ self.result.angular_momentum_axis_body[
+                        sample_index
+                    ]
+                ),
+                "moon_direction": (
+                    self.result.moon_position_inertial[sample_index]
+                ),
+                "torque": (
+                    body_to_inertial
+                    @ self.result.normalized_lunar_torque[
+                        sample_index
+                    ]
+                ),
+            }
+
+        raise ValueError(
+            f"Unsupported reference frame: "
+            f"{self.reference_frame!r}."
+        )
+    
+    
     def draw_state(self, sample_index: int) -> None:
         """Draw one simulation sample, replacing the previous scene."""
         if not 0 <= sample_index < self.number_of_samples:
@@ -890,6 +1113,119 @@ class RigidEarthViewer:
 
         elevation = getattr(self.axis, "elev", self.elevation)
         azimuth = getattr(self.axis, "azim", self.azimuth)
+
+        self.axis.clear()
+
+        self._configure_axis(
+            elevation=elevation,
+            azimuth=azimuth,
+        )
+
+        draw_oblate_earth(self.axis)
+
+        vectors = self._scene_vectors(sample_index)
+
+        if self.visibility["body_axes"]:
+            draw_body_axes(
+                self.axis,
+                directions=vectors["body_axes"],
+            )
+
+        figure_axis = vectors["figure_axis"]
+        rotation_axis_physical = vectors["rotation_axis"]
+        angular_momentum_axis_physical = (vectors["angular_momentum_axis"])
+        moon_direction = vectors["moon_direction"]
+        torque_direction = vectors["torque"]
+
+        if self.reference_frame == "inertial":
+            initial_figure_axis = (
+                self._initial_figure_axis_inertial()
+            )
+
+            figure_axis_display = exaggerate_direction(
+                direction=figure_axis,
+                reference_axis=initial_figure_axis,
+                factor=self.figure_axis_exaggeration,
+            )
+        else:
+            figure_axis_display = figure_axis
+
+        if self.reference_frame == "body":
+            rotation_axis_display = exaggerate_direction(
+                direction=rotation_axis_physical,
+                reference_axis=figure_axis,
+                factor=self.rotation_axis_exaggeration,
+            )
+
+            angular_momentum_axis_display = exaggerate_direction(
+                direction=angular_momentum_axis_physical,
+                reference_axis=figure_axis,
+                factor=self.angular_momentum_axis_exaggeration,
+            )
+
+        else:
+            rotation_axis_display = normalize_vector(
+                rotation_axis_physical
+            )
+
+            angular_momentum_axis_display = normalize_vector(
+                angular_momentum_axis_physical
+            )
+
+        time_days = self.result.time_days[sample_index]
+
+        angular_velocity_body = (
+            self.result.angular_velocity_body[sample_index]
+        )
+
+        angular_momentum_body = (
+            self.result.angular_momentum_body[sample_index]
+        )
+
+        normalized_torque_body = (
+            self.result.normalized_lunar_torque[sample_index]
+        )
+
+        if self.reference_frame == "body":
+            angular_velocity = angular_velocity_body
+            angular_momentum = angular_momentum_body
+            normalized_torque = normalized_torque_body
+            frame_suffix = "B"
+
+        else:
+            body_to_inertial = self._body_to_inertial_dcm(
+                sample_index
+            )
+
+            angular_velocity = (
+                body_to_inertial @ angular_velocity_body
+            )
+
+            angular_momentum = (
+                body_to_inertial @ angular_momentum_body
+            )
+
+            normalized_torque = (
+                body_to_inertial @ normalized_torque_body
+            )
+
+            frame_suffix = "I"
+
+        angular_momentum_magnitude = np.linalg.norm(
+            angular_momentum
+        )
+
+        frame_title = {
+            "body": "Body-Fixed Frame",
+            "inertial": "Inertial Frame",
+        }[self.reference_frame]
+
+        self.axis.set_title(
+            f"Rigid Earth in the {frame_title}\n"
+            f"Time = {time_days:.3f} days"
+        )
+        
+
 
         psi = self.result.psi[sample_index]
         epsilon = self.result.obliquity[sample_index]
@@ -909,50 +1245,34 @@ class RigidEarthViewer:
 
         theta_wrapped_degrees = np.rad2deg(theta) % 360.0
 
-        self.axis.clear()
-
-        draw_oblate_earth(self.axis)
-
-        if self.visibility["body_axes"]:
-            draw_body_axes(self.axis)
-
-        self._configure_axis(
-            elevation=elevation,
-            azimuth=azimuth,
-        )
-
-        figure_axis = self.result.figure_axis_body[sample_index]
-        rotation_axis_physical = (
-            self.result.rotation_axis_body[sample_index]
-        )
-
-        rotation_axis_display = exaggerate_direction(
-            direction=rotation_axis_physical,
-            reference_axis=figure_axis,
-            factor=self.rotation_axis_exaggeration,
-        )
-
-        moon_direction = self.result.moon_position_body[sample_index]
-        torque_direction = (
-            self.result.normalized_lunar_torque[sample_index]
-        )
 
         if self.visibility["figure_axis"]:
+            figure_axis_label = "Figure axis"
+
+            if (
+                self.reference_frame == "inertial"
+                and self.figure_axis_exaggeration != 1.0
+            ):
+                figure_axis_label += (
+                    f" (motion ×{self.figure_axis_exaggeration:.0e})"
+                )
+
             draw_vector(
                 self.axis,
-                figure_axis,
+                figure_axis_display,
                 length=1.55,
                 color="black",
-                label="Figure axis",
+                label=figure_axis_label,
                 linewidth=2.4,
                 linestyle="--",
             )
+        if self.reference_frame == "inertial":
+            self._draw_axis_marker(
+                axis_display=figure_axis_display,
+                settings_key="figure_axis",
+                display_length=1.55,
+            )
 
-        if (
-            self.visibility["rotation_axis"]
-            and self.trails["rotation_axis"]["enabled"]
-        ):
-            self._draw_rotation_axis_trail(sample_index)
 
         if self.visibility["rotation_axis"]:
             draw_vector(
@@ -964,9 +1284,26 @@ class RigidEarthViewer:
                 linewidth=2.6,
             )
 
-            self._draw_rotation_axis_marker(
-                rotation_axis_display,
+            self._draw_axis_marker(
+                axis_display=rotation_axis_display,
+                settings_key="rotation_axis",
                 display_length=1.65,
+            )
+
+        if self.visibility["angular_momentum_axis"]:
+            draw_vector(
+                self.axis,
+                angular_momentum_axis_display,
+                length=1.58,
+                color="cyan",
+                label=r"Angular-momentum axis $\hat{\mathbf{H}}$",
+                linewidth=2.5,
+            )
+
+            self._draw_axis_marker(
+                axis_display=angular_momentum_axis_display,
+                settings_key="angular_momentum_axis",
+                display_length=1.58,
             )
         
         if self.visibility["moon_direction"]:
@@ -991,32 +1328,56 @@ class RigidEarthViewer:
             )
 
         if self.visibility["rotation_axis_trail"]:
-            self._draw_rotation_axis_trail(sample_index)
+            self._draw_axis_trail(
+                sample_index,
+                vector_key="rotation_axis",
+                settings_key="rotation_axis",
+                exaggeration_factor=self.rotation_axis_exaggeration,
+                display_length=1.65,
+                label="Rotation-axis trail",
+            )
 
+        if self.visibility["angular_momentum_trail"]:
+            self._draw_axis_trail(
+                sample_index,
+                vector_key="angular_momentum_axis",
+                settings_key="angular_momentum_axis",
+                exaggeration_factor=(
+                    self.angular_momentum_axis_exaggeration
+                ),
+                display_length=1.58,
+                label="Momentum-axis trail",
+            )
 
-            
-
-        time_days = self.result.time_days[sample_index]
-        angular_velocity = (
-            self.result.angular_velocity_body[sample_index]
-        )
-        normalized_torque = (
-            self.result.normalized_lunar_torque[sample_index]
-        )
-
-        self.axis.set_title(
-            "Rigid Earth in the Body-Fixed Frame\n"
-            f"Time = {time_days:.3f} days"
-        )
+        if (
+            self.reference_frame == "inertial"
+            and self.visibility["figure_axis_trail"]
+            and self.trails["figure_axis"]["enabled"]
+        ):
+            self._draw_axis_trail(
+                sample_index,
+                vector_key="figure_axis",
+                settings_key="figure_axis",
+                exaggeration_factor=self.figure_axis_exaggeration,
+                display_length=1.55,
+                label="Figure-axis motion trail",
+                reference_mode="initial_inertial_figure_axis",
+            )
 
         trail_length = self.trails["rotation_axis"]["length"]
 
         self.information_text.set_text(
-            rf"$\omega_B=$ "
+            rf"$\omega_{{{frame_suffix}}}=$ "
             f"[{angular_velocity[0]:.3e}, "
             f"{angular_velocity[1]:.3e}, "
             f"{angular_velocity[2]:.3e}] rad/s\n"
-            rf"$d_B=$ "
+            rf"$\mathbf{{H}}_{{{frame_suffix}}}=$ "
+            f"[{angular_momentum[0]:.3e}, "
+            f"{angular_momentum[1]:.3e}, "
+            f"{angular_momentum[2]:.3e}] kg m$^2$ s$^{{-1}}$\n"
+            rf"$|\mathbf{{H}}|=$ "
+            f"{angular_momentum_magnitude:.3e} kg m$^2$ s$^{{-1}}$\n"
+            rf"$d_{{{frame_suffix}}}=$ "
             f"[{normalized_torque[0]:.3e}, "
             f"{normalized_torque[1]:.3e}, "
             f"{normalized_torque[2]:.3e}] s$^{{-2}}$\n"
@@ -1040,7 +1401,7 @@ class RigidEarthViewer:
                 handles,
                 labels,
                 loc="upper left",
-                bbox_to_anchor=(0.001, 0.78),
+                bbox_to_anchor=(0.001, 0.765),
                 fontsize=9,
             )
 
@@ -1319,6 +1680,29 @@ class RigidEarthViewer:
         )
 
         self.figure.canvas.draw_idle()
+
+    def set_reference_frame(
+        self,
+        reference_frame: str,
+    ) -> None:
+        """Set the frame in which the scene is displayed."""
+        valid_frames = {
+            "body",
+            "inertial",
+        }
+
+        if reference_frame not in valid_frames:
+            raise ValueError(
+                f"reference_frame must be one of "
+                f"{sorted(valid_frames)}, but received "
+                f"{reference_frame!r}."
+            )
+
+        if self.reference_frame == reference_frame:
+            return
+
+        self.reference_frame = reference_frame
+        self.draw_state(self.current_index)
 
 def interactive_rigid_earth_state_3d(
     result: SimulationResult,
