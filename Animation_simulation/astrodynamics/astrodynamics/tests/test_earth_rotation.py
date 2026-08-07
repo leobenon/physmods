@@ -16,6 +16,7 @@ from astrodynamics.dynamics.torques import (
     matlab_gravity_gradient_acceleration,
 )
 
+from astrodynamics.simulation import default_initial_state
 
 def test_euler_angle_derivative_matches_matlab_equations() -> None:
     angular_velocity = np.array([1.2e-8, -2.3e-8, 7.29e-5])
@@ -192,3 +193,15 @@ def test_euler_angle_singularity_raises_error() -> None:
             sidereal_angle=0.0,
             earth_rotation_rate=EARTH.rotation_rate,
         )
+
+def test_disabled_lunar_torque_removes_external_forcing() -> None:
+    state = default_initial_state()
+
+    derivative_without_torque = rigid_earth_state_derivative(
+        time=0.0,
+        state=state,
+        include_lunar_torque=False,
+    )
+
+    assert derivative_without_torque.shape == (6,)
+    assert np.all(np.isfinite(derivative_without_torque))

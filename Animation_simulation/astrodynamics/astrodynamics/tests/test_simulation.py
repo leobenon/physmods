@@ -10,6 +10,9 @@ from astrodynamics.simulation import (
     default_initial_state,
     simulate_rigid_earth,
 )
+from astrodynamics.dynamics.earth_rotation import (
+    rigid_earth_state_derivative,
+)
 
 
 def short_result():
@@ -215,4 +218,151 @@ def test_rotation_and_momentum_axes_differ_when_transverse_spin_exists() -> None
         expected_axis,
         rtol=1.0e-14,
         atol=1.0e-15,
+    )
+
+def test_lunar_torque_can_be_disabled() -> None:
+    result = simulate_rigid_earth(
+        duration_days=0.01,
+        output_step=300.0,
+        max_step=300.0,
+        include_lunar_torque=False,
+    )
+
+    assert result.include_lunar_torque is False
+
+    assert np.allclose(
+        result.normalized_lunar_torque,
+        0.0,
+        atol=0.0,
+    )
+def test_lunar_torque_is_enabled_by_default() -> None:
+    result = simulate_rigid_earth(
+        duration_days=0.01,
+        output_step=300.0,
+        max_step=300.0,
+    )
+
+    assert result.include_lunar_torque is True
+
+def test_lunar_torque_changes_the_simulation() -> None:
+    with_torque = simulate_rigid_earth(
+        duration_days=5.0,
+        output_step=3600.0,
+        max_step=3600.0,
+        include_lunar_torque=True,
+    )
+
+    without_torque = simulate_rigid_earth(
+        duration_days=5.0,
+        output_step=3600.0,
+        max_step=3600.0,
+        include_lunar_torque=False,
+    )
+
+    assert not np.array_equal(
+        with_torque.state,
+        without_torque.state,
+    )
+
+def test_solar_torque_is_disabled_by_default() -> None:
+    result = short_result()
+
+    assert result.include_solar_torque is False
+
+    assert np.allclose(
+        result.normalized_solar_torque,
+        0.0,
+        atol=0.0,
+    )
+
+def test_solar_torque_can_be_enabled() -> None:
+    result = simulate_rigid_earth(
+        duration_days=0.1,
+        output_step=600.0,
+        max_step=600.0,
+        include_lunar_torque=False,
+        include_solar_torque=True,
+    )
+
+    assert result.include_solar_torque is True
+
+    assert np.any(
+        result.normalized_solar_torque != 0.0
+    )
+
+def test_total_torque_is_sum_of_contributions() -> None:
+    result = simulate_rigid_earth(
+        duration_days=0.1,
+        output_step=600.0,
+        max_step=600.0,
+        include_lunar_torque=True,
+        include_solar_torque=True,
+    )
+
+    assert np.allclose(
+        result.normalized_total_torque,
+        (
+            result.normalized_lunar_torque
+            + result.normalized_solar_torque
+        ),
+        rtol=1.0e-14,
+        atol=1.0e-30,
+    )
+
+def test_all_torques_are_zero_when_disabled() -> None:
+    result = simulate_rigid_earth(
+        duration_days=0.1,
+        output_step=600.0,
+        max_step=600.0,
+        include_lunar_torque=False,
+        include_solar_torque=False,
+    )
+
+    assert np.allclose(
+        result.normalized_total_torque,
+        0.0,
+        atol=0.0,
+    )
+def test_combined_weak_torque_response_is_nearly_additive() -> None:
+    settings = {
+        "duration_days": 5.0,
+        "output_step": 3600.0,
+        "max_step": 3600.0,
+    }
+
+    no_torque = simulate_rigid_earth(
+        **settings,
+        include_lunar_torque=False,
+        include_solar_torque=False,
+    )
+
+    moon_only = simulate_rigid_earth(
+        **settings,
+        include_lunar_torque=True,
+        include_solar_torque=False,
+    )
+
+    sun_only = simulate_rigid_earth(
+        **settings,
+        include_lunar_torque=False,
+        include_solar_torque=True,
+    )
+
+    combined = simulate_rigid_earth(
+        **settings,
+        include_lunar_torque=True,
+        include_solar_torque=True,
+    )
+
+    expected_combined_change = (
+        moon_only.state
+        + sun_only.state
+        - no_torque.state
+    )
+
+    assert np.allclose(
+        combined.state,
+        expected_combined_change,
+        rtol=1.0e-8,
+        atol=1.0e-12,
     )

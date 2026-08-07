@@ -456,7 +456,10 @@ def test_scene_vectors_are_returned_in_body_frame() -> None:
         "rotation_axis",
         "angular_momentum_axis",
         "moon_direction",
-        "torque",
+        "sun_direction",
+        "lunar_torque",
+        "solar_torque",
+        "total_torque",
     }
 
     assert np.allclose(
@@ -511,6 +514,8 @@ def test_inertial_scene_vectors_have_correct_shape() -> None:
     assert vectors["rotation_axis"].shape == (3,)
     assert vectors["angular_momentum_axis"].shape == (3,)
     assert vectors["moon_direction"].shape == (3,)
-    assert vectors["torque"].shape == (3,)
+    assert vectors["lunar_torque"].shape == (3,)
+    assert vectors["solar_torque"].shape == (3,)
+    assert vectors["total_torque"].shape == (3,)
 
     plt.close(viewer.figure)

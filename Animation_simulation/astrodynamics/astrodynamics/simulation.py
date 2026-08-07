@@ -17,6 +17,7 @@ from astrodynamics.dynamics.torques import (
 
 from astrodynamics.bodies.earth import EARTH, EarthParameters
 from astrodynamics.bodies.moon import MOON, Moon
+from astrodynamics.bodies.sun import SUN, Sun
 from astrodynamics.constants import SECONDS_PER_DAY, SECONDS_PER_HOUR
 from astrodynamics.dynamics.earth_rotation import (
     rigid_earth_state_derivative,
@@ -36,12 +37,22 @@ class SimulationResult:
 
     moon_position_inertial: VectorHistory
     moon_position_body: VectorHistory
+
+    sun_position_inertial: VectorHistory
+    sun_position_body: VectorHistory
+
     normalized_lunar_torque: VectorHistory
+    normalized_solar_torque: VectorHistory
+    normalized_total_torque: VectorHistory
+
     angular_acceleration_body: VectorHistory
     rotation_axis_body: VectorHistory
     angular_momentum_body: VectorHistory
     angular_momentum_axis_body: VectorHistory
     figure_axis_body: VectorHistory
+
+    include_lunar_torque: bool
+    include_solar_torque: bool
 
     success: bool
     message: str
@@ -103,6 +114,9 @@ def simulate_rigid_earth(
     initial_state: NDArray[np.floating] | None = None,
     earth: EarthParameters = EARTH,
     moon: Moon = MOON,
+    sun: Sun = SUN,
+    include_lunar_torque: bool = True,
+    include_solar_torque: bool = False,
     method: str = "DOP853",
     relative_tolerance: float = 1.0e-10,
     absolute_tolerance: float | NDArray[np.floating] = 1.0e-13,
@@ -125,6 +139,9 @@ def simulate_rigid_earth(
         Earth model parameters.
     moon
         Moon model parameters.
+    include_lunar_torque
+        Whether the lunar gravity-gradient torque is included in the
+        rotational equations of motion.
     method
         Integration method accepted by scipy.integrate.solve_ivp.
     relative_tolerance
@@ -176,6 +193,9 @@ def simulate_rigid_earth(
             state=state,
             earth=earth,
             moon=moon,
+            sun=sun,
+            include_lunar_torque=include_lunar_torque,
+            include_solar_torque=include_solar_torque,
         ),
         t_span=(0.0, final_time),
         y0=state_0,
@@ -190,7 +210,11 @@ def simulate_rigid_earth(
     (
         moon_position_inertial,
         moon_position_body,
+        sun_position_inertial,
+        sun_position_body,
         normalized_lunar_torque,
+        normalized_solar_torque,
+        normalized_total_torque,
         angular_acceleration_body,
         rotation_axis_body,
         angular_momentum_body,
@@ -201,6 +225,9 @@ def simulate_rigid_earth(
         state=state_history,
         earth=earth,
         moon=moon,
+        sun=sun,
+        include_lunar_torque=include_lunar_torque,
+        include_solar_torque=include_solar_torque,
     )
 
     return SimulationResult(
@@ -208,12 +235,18 @@ def simulate_rigid_earth(
         state=state_history,
         moon_position_inertial=moon_position_inertial,
         moon_position_body=moon_position_body,
+        sun_position_inertial=sun_position_inertial,
+        sun_position_body=sun_position_body,
         normalized_lunar_torque=normalized_lunar_torque,
+        normalized_solar_torque=normalized_solar_torque,
+        normalized_total_torque=normalized_total_torque,
         angular_acceleration_body=angular_acceleration_body,
         rotation_axis_body=rotation_axis_body,
         angular_momentum_body=angular_momentum_body,
         angular_momentum_axis_body=angular_momentum_axis_body,
         figure_axis_body=figure_axis_body,
+        include_lunar_torque=include_lunar_torque,
+        include_solar_torque=include_solar_torque,
         success=solution.success,
         message=solution.message,
         function_evaluations=solution.nfev,
@@ -289,7 +322,14 @@ def compute_derived_histories(
     *,
     earth: EarthParameters = EARTH,
     moon: Moon = MOON,
+    sun: Sun = SUN,
+    include_lunar_torque: bool = True,
+    include_solar_torque: bool = False,
 ) -> tuple[
+    VectorHistory,
+    VectorHistory,
+    VectorHistory,
+    VectorHistory,
     VectorHistory,
     VectorHistory,
     VectorHistory,
@@ -306,14 +346,18 @@ def compute_derived_histories(
     tuple
         Histories of:
 
-        1. Moon position in the inertial frame
-        2. Moon position in the body-fixed frame
-        3. Normalized lunar torque
-        4. Body-frame angular acceleration
-        5. Body-frame rotation-axis direction
-        6. Body-frame angular momentum
-        7. Body-frame angular-momentum-axis direction
-        8. Body-frame figure-axis direction
+        1. Moon position in inertial frame
+        2. Moon position in body frame
+        3. Sun position in inertial frame
+        4. Sun position in body framewq
+        5. Normalized lunar torque
+        6. Normalized solar torque
+        7. Normalized total torque
+        8. Angular acceleration
+        9. Rotation axis
+        10. Angular momentum
+        11. Angular momentum axis
+        12. Figure axis
     """
     time = np.asarray(time, dtype=float)
     state = np.asarray(state, dtype=float)
@@ -343,21 +387,55 @@ def compute_derived_histories(
     normalized_lunar_torque = np.empty_like(
         moon_position_inertial
     )
+
+    sun_position_inertial = np.empty_like(
+        moon_position_inertial
+    )
+
+    sun_position_body = np.empty_like(
+        moon_position_inertial
+    )
+
+    normalized_solar_torque = np.empty_like(
+        moon_position_inertial
+    )
+
+    normalized_total_torque = np.empty_like(
+        moon_position_inertial
+    )
+
     angular_acceleration_body = np.empty_like(
         moon_position_inertial
     )
     rotation_axis_body = np.empty_like(
         moon_position_inertial
     )
-    angular_momentum_body = np.empty_like(
-        moon_position_inertial
+    
+    principal_moments = np.asarray(
+        earth.principal_moments,
+        dtype=float,
     )
 
-    angular_momentum_axis_body = np.empty_like(
-        moon_position_inertial
+    angular_momentum_body = (
+        state[:, :3]
+        * principal_moments[np.newaxis, :]
     )
-    
-    principal_moments = earth.principal_moments
+
+    angular_momentum_norms = np.linalg.norm(
+        angular_momentum_body,
+        axis=1,
+        keepdims=True,
+    )
+
+    angular_momentum_axis_body = np.divide(
+        angular_momentum_body,
+        angular_momentum_norms,
+        out=np.zeros_like(
+            angular_momentum_body,
+            dtype=float,
+        ),
+        where=angular_momentum_norms > 0.0,
+    )
 
     # In the body-fixed principal-axis frame, the figure axis is e3.
     figure_axis_body = np.tile(
@@ -382,23 +460,63 @@ def compute_derived_histories(
             )
         )
 
-        normalized_lunar_torque[index] = (
-            matlab_gravity_gradient_acceleration(
-                position_body=moon_position_body[index],
-                gravitational_parameter=(
-                    moon.gravitational_parameter
-                ),
-                gamma_1=earth.gamma_1,
-                gamma_2=earth.gamma_2,
-                gamma_3=earth.gamma_3,
+        sun_position_inertial[index] = (
+            sun.position_inertial(current_time)
+        )
+
+        sun_position_body[index] = (
+            sun.position_body_fixed(
+                time=current_time,
+                sidereal_angle=sidereal_angle,
             )
+        )
+
+        if include_lunar_torque:
+            normalized_lunar_torque[index] = (
+                matlab_gravity_gradient_acceleration(
+                    position_body=moon_position_body[index],
+                    gravitational_parameter=(
+                        moon.gravitational_parameter
+                    ),
+                    gamma_1=earth.gamma_1,
+                    gamma_2=earth.gamma_2,
+                    gamma_3=earth.gamma_3,
+                )
+            )
+        else:
+            normalized_lunar_torque[index] = np.zeros(
+                3,
+                dtype=float,
+            )
+
+        if include_solar_torque:
+            normalized_solar_torque[index] = (
+                matlab_gravity_gradient_acceleration(
+                    position_body=sun_position_body[index],
+                    gravitational_parameter=(
+                        sun.gravitational_parameter
+                    ),
+                    gamma_1=earth.gamma_1,
+                    gamma_2=earth.gamma_2,
+                    gamma_3=earth.gamma_3,
+                )
+            )
+        else:
+            normalized_solar_torque[index] = np.zeros(
+                3,
+                dtype=float,
+            )
+
+        normalized_total_torque[index] = (
+            normalized_lunar_torque[index]
+            + normalized_solar_torque[index]
         )
 
         angular_acceleration_body[index] = (
             angular_velocity_derivative(
                 angular_velocity_body=angular_velocity,
                 normalized_torque_body=(
-                    normalized_lunar_torque[index]
+                    normalized_total_torque[index]
                 ),
                 gamma_1=earth.gamma_1,
                 gamma_2=earth.gamma_2,
@@ -417,26 +535,15 @@ def compute_derived_histories(
                 angular_velocity / angular_speed
             )
 
-        angular_momentum_body[index] = (
-            principal_moments * angular_velocity
-        )
-
-        angular_momentum_magnitude = np.linalg.norm(
-            angular_momentum_body[index]
-        )
-
-        if angular_momentum_magnitude == 0.0:
-            angular_momentum_axis_body[index] = np.zeros(3)
-        else:
-            angular_momentum_axis_body[index] = (
-                angular_momentum_body[index]
-                / angular_momentum_magnitude
-            )
 
     return (
         moon_position_inertial,
         moon_position_body,
+        sun_position_inertial,
+        sun_position_body,
         normalized_lunar_torque,
+        normalized_solar_torque,
+        normalized_total_torque,
         angular_acceleration_body,
         rotation_axis_body,
         angular_momentum_body,

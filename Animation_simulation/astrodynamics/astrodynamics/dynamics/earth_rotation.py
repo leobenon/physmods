@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 
 from astrodynamics.bodies.earth import EARTH, EarthParameters
 from astrodynamics.bodies.moon import MOON, Moon
+from astrodynamics.bodies.sun import SUN, Sun
 from astrodynamics.dynamics.rigid_body import (
     angular_velocity_derivative,
 )
@@ -107,6 +108,9 @@ def rigid_earth_state_derivative(
     *,
     earth: EarthParameters = EARTH,
     moon: Moon = MOON,
+    sun: Sun = SUN,
+    include_lunar_torque: bool = True,
+    include_solar_torque: bool = False,
 ) -> StateVector:
     """Return the derivative of the complete rigid-Earth state.
 
@@ -142,24 +146,62 @@ def rigid_earth_state_derivative(
     obliquity = state[4]
     sidereal_angle = state[5]
 
-    moon_position_body = moon.position_body_fixed(
-        time=time,
-        sidereal_angle=sidereal_angle,
-    )
 
-    normalized_lunar_torque = (
-        matlab_gravity_gradient_acceleration(
-            position_body=moon_position_body,
-            gravitational_parameter=moon.gravitational_parameter,
-            gamma_1=earth.gamma_1,
-            gamma_2=earth.gamma_2,
-            gamma_3=earth.gamma_3,
+
+    if include_lunar_torque:
+        moon_position_body = moon.position_body_fixed(
+            time=time,
+            sidereal_angle=sidereal_angle,
         )
+
+        normalized_lunar_torque = (
+            matlab_gravity_gradient_acceleration(
+                position_body=moon_position_body,
+                gravitational_parameter=(
+                    moon.gravitational_parameter
+                ),
+                gamma_1=earth.gamma_1,
+                gamma_2=earth.gamma_2,
+                gamma_3=earth.gamma_3,
+            )
+        )
+    else:
+        normalized_lunar_torque = np.zeros(
+            3,
+            dtype=float,
+        )
+
+    if include_solar_torque:
+        sun_position_body = sun.position_body_fixed(
+            time=time,
+            sidereal_angle=sidereal_angle,
+        )
+
+        normalized_solar_torque = (
+            matlab_gravity_gradient_acceleration(
+                position_body=sun_position_body,
+                gravitational_parameter=(
+                    sun.gravitational_parameter
+                ),
+                gamma_1=earth.gamma_1,
+                gamma_2=earth.gamma_2,
+                gamma_3=earth.gamma_3,
+            )
+        )
+    else:
+        normalized_solar_torque = np.zeros(
+            3,
+            dtype=float,
+        )
+
+    normalized_total_torque = (
+        normalized_lunar_torque
+        + normalized_solar_torque
     )
 
     angular_velocity_dot = angular_velocity_derivative(
         angular_velocity_body=angular_velocity_body,
-        normalized_torque_body=normalized_lunar_torque,
+        normalized_torque_body=normalized_total_torque,
         gamma_1=earth.gamma_1,
         gamma_2=earth.gamma_2,
         gamma_3=earth.gamma_3,

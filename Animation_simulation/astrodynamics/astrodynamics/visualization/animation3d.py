@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+from collections.abc import Callable
 
 from matplotlib.animation import FuncAnimation, PillowWriter,FFMpegWriter
 import matplotlib.pyplot as plt
@@ -9,7 +10,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.axes3d import Axes3D
-from matplotlib.widgets import Button, CheckButtons, Slider
+from matplotlib.widgets import Button, CheckButtons, RadioButtons,Slider
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from matplotlib.colors import to_rgba
 
@@ -357,15 +358,39 @@ class RigidEarthViewer:
         result: SimulationResult,
         *,
         initial_index: int = 0,
+        simulation_factory: Callable[..., SimulationResult] | None = None,
         rotation_axis_exaggeration: float = 1.0e6,
         angular_momentum_axis_exaggeration: float | None = None,
         figure_axis_exaggeration: float = 1.0e4,
         elevation: float = 24.0,
         azimuth: float = 38.0,
+        moon_orbit_model: str = "circular",
+        sun_orbit_model: str = "circular",
 
     ) -> None:
         
+        self.simulation_factory = simulation_factory
         self.reference_frame = "body"
+
+        valid_orbit_models = {
+            "circular",
+            "elliptical",
+        }
+
+        if moon_orbit_model not in valid_orbit_models:
+            raise ValueError(
+                "moon_orbit_model must be "
+                "'circular' or 'elliptical'."
+            )
+
+        if sun_orbit_model not in valid_orbit_models:
+            raise ValueError(
+                "sun_orbit_model must be "
+                "'circular' or 'elliptical'."
+            )
+
+        self.moon_orbit_model = moon_orbit_model
+        self.sun_orbit_model = sun_orbit_model
         
         self.result = result
         self.number_of_samples = result.time.size
@@ -414,13 +439,18 @@ class RigidEarthViewer:
         self.animation_step = 1
         self.timer_interval_ms = 50
 
+        
+
         self.visibility = {
             "body_axes": True,
             "figure_axis": True,
             "rotation_axis": True,
             "angular_momentum_axis": True,
             "moon_direction": True,
-            "torque": True,
+            "sun_direction": True,
+            "lunar_torque": True,
+            "solar_torque": True,
+            "total_torque": True,
             "rotation_axis_trail": True,
             "angular_momentum_trail": True,
             "figure_axis_trail": True,
@@ -432,7 +462,10 @@ class RigidEarthViewer:
             "Rotation axis": "rotation_axis",
             "Angular momentum": "angular_momentum_axis",
             "Moon direction": "moon_direction",
-            "Torque": "torque",
+            "Sun direction": "sun_direction",
+            "Lunar torque": "lunar_torque",
+            "Solar torque": "solar_torque",
+            "Total torque": "total_torque",
             "Rotation-axis trail": "rotation_axis_trail",
             "Momentum-axis trail": "angular_momentum_trail",
             "Figure-axis trail": "figure_axis_trail",
@@ -611,7 +644,7 @@ class RigidEarthViewer:
         )
 
         self.visibility_axis = self.figure.add_axes(
-            [0.76, 0.78, 0.235, 0.19]
+            [0.76, 0.66, 0.235, 0.30]
         )
 
         visibility_labels = [
@@ -620,7 +653,10 @@ class RigidEarthViewer:
             "Rotation axis",
             "Angular momentum",
             "Moon direction",
-            "Torque",
+            "Sun direction",
+            "Lunar torque",
+            "Solar torque",
+            "Total torque",
             "Rotation-axis trail",
             "Momentum-axis trail",
             "Figure-axis trail",
@@ -632,7 +668,10 @@ class RigidEarthViewer:
             self.visibility["rotation_axis"],
             self.visibility["angular_momentum_axis"],
             self.visibility["moon_direction"],
-            self.visibility["torque"],
+            self.visibility["sun_direction"],
+            self.visibility["lunar_torque"],
+            self.visibility["solar_torque"],
+            self.visibility["total_torque"],
             self.visibility["rotation_axis_trail"],
             self.visibility["angular_momentum_trail"],
             self.visibility["figure_axis_trail"],
@@ -666,6 +705,123 @@ class RigidEarthViewer:
             self._on_visibility_changed
         )
 
+        self.frame_selector_axis = self.figure.add_axes(
+            [0.80, 0.52, 0.16, 0.10]
+        )
+
+        self.frame_selector_axis.set_title(
+            "Reference frame",
+            fontsize=11,
+        )
+
+        active_frame = (
+            0 if self.reference_frame == "body"
+            else 1
+        )
+
+        self.frame_selector = RadioButtons(
+            self.frame_selector_axis,
+            (
+                "Body-fixed",
+                "Inertial",
+            ),
+            active=active_frame,
+        )
+
+        self.frame_selector.on_clicked(
+            self._on_reference_frame_changed
+        )
+
+        self.physics_axis = self.figure.add_axes(
+            [0.80, 0.37, 0.16, 0.10]
+        )
+
+        self.physics_axis.set_title(
+            "Active torques",
+            fontsize=11,
+        )
+
+        self.physics_checkboxes = CheckButtons(
+            self.physics_axis,
+            labels=[
+                "Lunar torque",
+                "Solar torque",
+            ],
+            actives=[
+                self.result.include_lunar_torque,
+                self.result.include_solar_torque,
+            ],
+            label_props={
+                "fontsize": [11, 11],
+            },
+            frame_props={
+                "s": [90, 90],
+                "linewidth": [1.5, 1.5],
+            },
+            check_props={
+                "s": [90, 90],
+                "linewidth": [2.0, 2.0],
+            },
+        )
+
+        self.physics_checkboxes.on_clicked(
+            self._on_torque_configuration_changed
+        )
+
+        self.moon_orbit_axis = self.figure.add_axes(
+            [0.88, 0.25, 0.10, 0.06]
+        )
+
+        self.moon_orbit_axis.set_title(
+            "Moon orbit",
+            fontsize=11,
+        )
+
+        active_orbit = (
+            0
+            if self.moon_orbit_model == "circular"
+            else 1
+        )
+
+        self.moon_orbit_selector = RadioButtons(
+            self.moon_orbit_axis,
+            (
+                "Circular",
+                "Elliptical",
+            ),
+            active=active_orbit,
+        )
+
+        self.moon_orbit_selector.on_clicked(
+            self._on_moon_orbit_changed
+        )
+
+        self.sun_orbit_axis = self.figure.add_axes(
+            [0.78, 0.25, 0.10, 0.06]
+        )
+
+        self.sun_orbit_axis.set_title(
+            "Earth orbit",
+            fontsize=11,
+        )
+
+        active_sun_orbit = (
+            0 if self.sun_orbit_model == "circular"
+            else 1
+        )
+
+        self.sun_orbit_selector = RadioButtons(
+            self.sun_orbit_axis,
+            (
+                "Circular",
+                "Elliptical",
+            ),
+            active=active_sun_orbit,
+        )
+
+        self.sun_orbit_selector.on_clicked(
+            self._on_sun_orbit_changed
+        )
 
         
         self.legend = None
@@ -896,15 +1052,230 @@ class RigidEarthViewer:
         label: str,
     ) -> None:
         """Toggle the visibility of a scene element."""
-
         key = self.visibility_label_to_key[label]
         self.visibility[key] = not self.visibility[key]
 
-        if key == "rotation_axis_trail":
-            self.trails["rotation_axis"]["enabled"] = self.visibility[key]
+        trail_visibility_map = {
+            "rotation_axis_trail": "rotation_axis",
+            "angular_momentum_trail": (
+                "angular_momentum_axis"
+            ),
+            "figure_axis_trail": "figure_axis",
+        }
 
-    
-        self.draw_state(self.current_index)
+        if key in trail_visibility_map:
+            trail_key = trail_visibility_map[key]
+
+            self.trails[trail_key]["enabled"] = (
+                self.visibility[key]
+            )
+
+        self.draw_state(
+            self.current_index
+        )
+
+    def _on_reference_frame_changed(
+        self,
+        label: str,
+    ) -> None:
+        """Change the displayed reference frame."""
+        frame_map = {
+            "Body-fixed": "body",
+            "Inertial": "inertial",
+        }
+
+        self.set_reference_frame(
+            frame_map[label]
+        )
+
+    def _on_torque_configuration_changed(
+        self,
+        _label: str,
+    ) -> None:
+        if self.simulation_factory is None:
+            raise RuntimeError(
+                "Torque controls require a simulation_factory."
+            )
+
+        self._rerun_simulation(
+            **self._current_physics_configuration()
+        )
+
+    def _on_moon_orbit_changed(
+        self,
+        label: str,
+    ) -> None:
+        """Change the lunar orbit model and rerun the simulation."""
+        orbit_map = {
+            "Circular": "circular",
+            "Elliptical": "elliptical",
+        }
+
+        new_model = orbit_map[label]
+
+        if new_model == self.moon_orbit_model:
+            return
+
+        self.moon_orbit_model = new_model
+
+        self._rerun_simulation(
+            **self._current_physics_configuration()
+        )
+
+    def _on_sun_orbit_changed(
+        self,
+        label: str,
+    ) -> None:
+        orbit_map = {
+            "Circular": "circular",
+            "Elliptical": "elliptical",
+        }
+
+        new_model = orbit_map[label]
+
+        if new_model == self.sun_orbit_model:
+            return
+
+        self.sun_orbit_model = new_model
+
+        self._rerun_simulation(
+            **self._current_physics_configuration()
+        )
+
+    def _current_physics_configuration(
+        self,
+    ) -> dict[str, object]:
+        status = self.physics_checkboxes.get_status()
+
+        return {
+            "include_lunar_torque": bool(status[0]),
+            "include_solar_torque": bool(status[1]),
+            "moon_orbit_model": self.moon_orbit_model,
+            "sun_orbit_model": self.sun_orbit_model,
+        }
+
+    def _rerun_simulation(
+        self,
+        *,
+        include_lunar_torque: bool,
+        include_solar_torque: bool,
+        moon_orbit_model: str,
+        sun_orbit_model: str,
+    ) -> None:
+        """Replace the result using a new torque configuration."""
+        if self.simulation_factory is None:
+            raise RuntimeError(
+                "No simulation_factory was supplied."
+            )
+
+        was_playing = self.is_playing
+        self.pause()
+
+        current_time = float(
+            self.result.time[self.current_index]
+        )
+
+        self.information_text.set_text(
+            "Recomputing simulation..."
+        )
+        self.figure.canvas.draw_idle()
+        self.figure.canvas.flush_events()
+
+        try:
+            new_result = self.simulation_factory(
+                include_lunar_torque=include_lunar_torque,
+                include_solar_torque=include_solar_torque,
+                moon_orbit_model=moon_orbit_model,
+                sun_orbit_model=sun_orbit_model,
+            )
+
+            if not new_result.success:
+                raise RuntimeError(
+                    new_result.message
+                )
+
+            self.result = new_result
+            self.number_of_samples = (
+                new_result.time.size
+            )
+
+            self.current_index = int(
+                np.argmin(
+                    np.abs(
+                        new_result.time
+                        - current_time
+                    )
+                )
+            )
+
+            self._update_time_slider_for_new_result()
+            self._update_trail_limits_for_new_result()
+
+            self.draw_state(
+                self.current_index
+            )
+
+        finally:
+            if was_playing:
+                self.play()
+
+
+
+
+    def _update_time_slider_for_new_result(self) -> None:
+        """Update the time slider after replacing the simulation result."""
+        minimum_time = float(
+            self.result.time_days[0]
+        )
+        maximum_time = float(
+            self.result.time_days[-1]
+        )
+
+        self.time_slider.valmin = minimum_time
+        self.time_slider.valmax = maximum_time
+        self.time_slider.valstep = self.result.time_days
+
+        self.time_slider.ax.set_xlim(
+            minimum_time,
+            maximum_time,
+        )
+
+        current_time_days = float(
+            self.result.time_days[self.current_index]
+        )
+
+        self.time_slider.set_val(
+            current_time_days
+        )
+
+    def _update_trail_limits_for_new_result(self) -> None:
+        """Restrict all trail lengths to the new number of samples."""
+        maximum_length = int(
+            self.number_of_samples
+        )
+
+        for settings in self.trails.values():
+            settings["length"] = min(
+                int(settings["length"]),
+                maximum_length,
+            )
+
+        self.trail_length_slider.valmax = maximum_length
+        self.trail_length_slider.ax.set_xlim(
+            self.trail_length_slider.valmin,
+            maximum_length,
+        )
+
+        displayed_length = min(
+            int(
+                self.trails["rotation_axis"]["length"]
+            ),
+            maximum_length,
+        )
+
+        self.trail_length_slider.set_val(
+            displayed_length
+        )
 
     def _on_play_pause_clicked(self, event) -> None:
         """Toggle automatic playback."""
@@ -1057,8 +1428,21 @@ class RigidEarthViewer:
                 "moon_direction": (
                     self.result.moon_position_body[sample_index]
                 ),
-                "torque": (
+                "sun_direction": (
+                    self.result.sun_position_body[sample_index]
+                ),
+                "lunar_torque": (
                     self.result.normalized_lunar_torque[
+                        sample_index
+                    ]
+                ),
+                "solar_torque": (
+                    self.result.normalized_solar_torque[
+                        sample_index
+                    ]
+                ),
+                "total_torque": (
+                    self.result.normalized_total_torque[
                         sample_index
                     ]
                 ),
@@ -1085,12 +1469,31 @@ class RigidEarthViewer:
                         sample_index
                     ]
                 ),
+
                 "moon_direction": (
                     self.result.moon_position_inertial[sample_index]
                 ),
-                "torque": (
+                "sun_direction": (
+                    self.result.sun_position_inertial[sample_index]
+                ),
+
+                "lunar_torque": (
                     body_to_inertial
                     @ self.result.normalized_lunar_torque[
+                        sample_index
+                    ]
+                ),
+
+                "solar_torque": (
+                    body_to_inertial
+                    @ self.result.normalized_solar_torque[
+                        sample_index
+                    ]
+                ),
+
+                "total_torque": (
+                    body_to_inertial
+                    @ self.result.normalized_total_torque[
                         sample_index
                     ]
                 ),
@@ -1135,7 +1538,11 @@ class RigidEarthViewer:
         rotation_axis_physical = vectors["rotation_axis"]
         angular_momentum_axis_physical = (vectors["angular_momentum_axis"])
         moon_direction = vectors["moon_direction"]
-        torque_direction = vectors["torque"]
+        sun_direction = vectors["sun_direction"]
+
+        lunar_torque_direction = vectors["lunar_torque"]
+        solar_torque_direction = vectors["solar_torque"]
+        total_torque_direction = vectors["total_torque"]
 
         if self.reference_frame == "inertial":
             initial_figure_axis = (
@@ -1182,14 +1589,32 @@ class RigidEarthViewer:
             self.result.angular_momentum_body[sample_index]
         )
 
-        normalized_torque_body = (
-            self.result.normalized_lunar_torque[sample_index]
+        total_torque_body = (
+            self.result.normalized_total_torque[
+                sample_index
+            ]
+        )
+
+        lunar_torque_body = (
+            self.result.normalized_lunar_torque[
+                sample_index
+            ]
+        )
+
+        solar_torque_body = (
+            self.result.normalized_solar_torque[
+                sample_index
+            ]
         )
 
         if self.reference_frame == "body":
             angular_velocity = angular_velocity_body
             angular_momentum = angular_momentum_body
-            normalized_torque = normalized_torque_body
+
+            lunar_torque = lunar_torque_body
+            solar_torque = solar_torque_body
+            total_torque = total_torque_body
+
             frame_suffix = "B"
 
         else:
@@ -1205,8 +1630,16 @@ class RigidEarthViewer:
                 body_to_inertial @ angular_momentum_body
             )
 
-            normalized_torque = (
-                body_to_inertial @ normalized_torque_body
+            lunar_torque = (
+                body_to_inertial @ lunar_torque_body
+            )
+
+            solar_torque = (
+                body_to_inertial @ solar_torque_body
+            )
+
+            total_torque = (
+                body_to_inertial @ total_torque_body
             )
 
             frame_suffix = "I"
@@ -1316,14 +1749,46 @@ class RigidEarthViewer:
                 linewidth=2.0,
             )
 
-        if self.visibility["torque"]:
+        if self.visibility["sun_direction"]:
             draw_vector(
                 self.axis,
-                torque_direction,
-                length=1.25,
-                color="purple",
-                label="Normalized lunar torque",
+                sun_direction,
+                length=1.70,
+                color="gold",
+                label="Sun direction",
                 linewidth=2.0,
+            )
+
+        if self.visibility["lunar_torque"]:
+            draw_vector(
+                self.axis,
+                lunar_torque_direction,
+                length=1.15,
+                color="grey",
+                label="Normalized lunar GG torque",
+                linewidth=1.7,
+                normalization_tolerance=1.0e-20,
+            )
+
+        if self.visibility["solar_torque"]:
+            draw_vector(
+                self.axis,
+                solar_torque_direction,
+                length=1.10,
+                color="brown",
+                label="Normalized solar GG torque",
+                linewidth=1.7,
+                normalization_tolerance=1.0e-20,
+            )
+
+        if self.visibility["total_torque"]:
+            draw_vector(
+                self.axis,
+                total_torque_direction,
+                length=1.30,
+                color="darkviolet",
+                label="Normalized total torque",
+                linewidth=2.6,
                 normalization_tolerance=1.0e-20,
             )
 
@@ -1366,7 +1831,23 @@ class RigidEarthViewer:
 
         trail_length = self.trails["rotation_axis"]["length"]
 
+        lunar_status = (
+            "ON"
+            if self.result.include_lunar_torque
+            else "OFF"
+        )
+
+        solar_status = (
+            "ON"
+            if self.result.include_solar_torque
+            else "OFF"
+        )
+
         self.information_text.set_text(
+            f"Moon orbit = {self.moon_orbit_model.capitalize()}\n"
+            f"Earth orbit = {self.sun_orbit_model.capitalize()}\n"
+            f"Lunar torque = {lunar_status}\n"
+            f"Solar torque = {solar_status}\n"
             rf"$\omega_{{{frame_suffix}}}=$ "
             f"[{angular_velocity[0]:.3e}, "
             f"{angular_velocity[1]:.3e}, "
@@ -1377,10 +1858,22 @@ class RigidEarthViewer:
             f"{angular_momentum[2]:.3e}] kg m$^2$ s$^{{-1}}$\n"
             rf"$|\mathbf{{H}}|=$ "
             f"{angular_momentum_magnitude:.3e} kg m$^2$ s$^{{-1}}$\n"
-            rf"$d_{{{frame_suffix}}}=$ "
-            f"[{normalized_torque[0]:.3e}, "
-            f"{normalized_torque[1]:.3e}, "
-            f"{normalized_torque[2]:.3e}] s$^{{-2}}$\n"
+
+            rf"$d^L_{{{frame_suffix}}}=$ "
+            f"[{lunar_torque[0]:.3e}, "
+            f"{lunar_torque[1]:.3e}, "
+            f"{lunar_torque[2]:.3e}] s$^{{-2}}$\n"
+
+            rf"$d^S_{{{frame_suffix}}}=$ "
+            f"[{solar_torque[0]:.3e}, "
+            f"{solar_torque[1]:.3e}, "
+            f"{solar_torque[2]:.3e}] s$^{{-2}}$\n"
+
+            rf"$d^{{tot}}_{{{frame_suffix}}}=$ "
+            f"[{total_torque[0]:.3e}, "
+            f"{total_torque[1]:.3e}, "
+            f"{total_torque[2]:.3e}] s$^{{-2}}$\n"
+
             f"Trail length = {trail_length} samples\n"
             rf"$\psi={psi_degrees:.6f}^\circ$" f"\n"
             rf"$\epsilon={epsilon_degrees:.6f}^\circ$" f"\n"
@@ -1401,7 +1894,7 @@ class RigidEarthViewer:
                 handles,
                 labels,
                 loc="upper left",
-                bbox_to_anchor=(0.001, 0.765),
+                bbox_to_anchor=(0.001, 0.64),
                 fontsize=9,
             )
 
@@ -1444,9 +1937,17 @@ class RigidEarthViewer:
         self,
         value: float,
     ) -> None:
-        """Update the rotation-axis trail length."""
-        self.trails["rotation_axis"]["length"] = int(round(value))
-        self.draw_state(self.current_index)
+        """Update the length of all displayed axis trails."""
+        trail_length = int(
+            round(value)
+        )
+
+        for settings in self.trails.values():
+            settings["length"] = trail_length
+
+        self.draw_state(
+            self.current_index
+        )
 
     def set_index(self, sample_index: int) -> None:
         """Display a specific stored output sample."""
